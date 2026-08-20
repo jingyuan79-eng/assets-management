@@ -439,8 +439,11 @@ function rebuildStockGroups(rows){
     // 现金：作为 noprice 放进"黄金·加密·现金"组
     if(sym.toLowerCase()==='cash' || sym==='\u73b0\u91d1'){
       const g = groupByCat['\u9ec4\u91d1 \u00b7 \u52a0\u5bc6 \u00b7 \u73b0\u91d1'];
-      // 保留已有的券商现金金额（从旧数据找），否则用0
-      g.holdings.push({sym:'\u73b0\u91d1', noprice:true, mv:loadBrokerCash(), desc:'\u5238\u5546\u53ef\u7528\u00b7\u53ef\u70b9\u51fb\u7f16\u8f91'});
+      // 方案A：以 Sheet 的 C 列(shares)为准；Sheet 为空时用本地值
+      const sheetCash = parseFloat(row.shares);
+      const cashVal = isFinite(sheetCash) ? sheetCash : loadBrokerCash();
+      saveBrokerCash(cashVal);   // 同步到本地
+      g.holdings.push({sym:'\u73b0\u91d1', noprice:true, mv:Math.round(cashVal), desc:'\u5238\u5546\u53ef\u7528\u00b7\u53ef\u70b9\u51fb\u7f16\u8f91'});
       return;
     }
     const rawCat = (row.category||'').toString().trim();
@@ -1237,12 +1240,38 @@ function showStockPanel(gi,hi){
   wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
 function closeStockPanel(){ const w=document.getElementById('slot-'+curStock.gi+'-'+curStock.hi); if(w) w.innerHTML=''; }
+
+// ==================== 写回 Google Sheet ====================
+function pushToSheet(payload){
+  return fetch(SHEET_API, {
+    method:'POST',
+    body: JSON.stringify(payload)
+  }).then(function(r){ return r.json(); })
+    .then(function(res){
+      if(res && res.status!=='success'){ console.log('sheet write warn:', res.message); }
+      return res;
+    })
+    .catch(function(e){
+      console.log('sheet write failed', e);
+      alert('\u5df2\u5728\u672c\u5730\u66f4\u65b0\uff0c\u4f46\u540c\u6b65\u5230 Sheet \u5931\u8d25\uff08\u7f51\u7edc\u95ee\u9898\uff09');
+    });
+}
+function syncStockToSheet(it){
+  if(!it) return;
+  pushToSheet({action:'updateStock', symbol:it.sym,
+               shares:Number(it.shares.toFixed(4)), cost:Number(it.cost.toFixed(4))});
+}
+function syncCashToSheet(){
+  pushToSheet({action:'updateCash', amount:loadBrokerCash()});
+}
+
 function stockAction(kind){
   const it=stockItem();
   const w=document.getElementById('stockActionWrap');
   if(kind==='price'){
-    w.innerHTML='<div class="fld" style="margin-top:12px"><label>\u65b0\u73b0\u4ef7 ($/\u80a1)</label>'+
-      '<input id="s-price" type="number" inputmode="decimal" value="'+it.price+'"></div>'+
+    w.innerHTML='<div class="fld" style="margin-top:12px"><label>\u65b0\u6210\u672c\u4ef7 ($/\u80a1)</label>'+
+      '<input id="s-price" type="number" inputmode="decimal" value="'+it.cost.toFixed(2)+'"></div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">\u73b0\u4ef7\u7531 Sheet \u81ea\u52a8\u62c9\u53d6\uff0c\u6b64\u5904\u4ec5\u4fee\u6b63\u6210\u672c</div>'+
       '<button class="save" style="background:var(--stock)" onclick="applyPrice()">\u786e\u8ba4</button>';
     document.getElementById('s-price').focus();
     return;
@@ -1268,24 +1297,40 @@ function applyBuy(){
   // 从券商现金扣款
   const bc=brokerCashItem(); if(bc){ bc.mv=Math.max(0,Math.round((bc.mv||0)-sh*px)); saveBrokerCash(bc.mv); }
   afterStockChange();
+  syncStockToSheet(it);
+  syncCashToSheet();
 }
 function applySell(){
   const it=stockItem();
   const sh=parseFloat(document.getElementById('s-sh').value);
   const px=parseFloat(document.getElementById('s-px').value);
   if(!(sh>0)){ alert('\u8bf7\u8f93\u5165\u80a1\u6570'); return; }
-  if(sh>it.shares){ alert('\u51cf\u6301\u80a1\u6570\u8d85\u8fc7\u6301\u4ed3'); return; }
-  it.shares=it.shares-sh;   // 成本不变
-  if(px>0) it.price=px;
+  const sym=it.sym;
+  const sellPx=(px>0?px:it.price);
+  const soldOut = (sh>=it.shares-1e-9);   // 减持等于全部持仓
   // 卖出所得进券商现金
-  const bc=brokerCashItem(); if(bc){ bc.mv=Math.round((bc.mv||0)+sh*(px>0?px:it.price)); saveBrokerCash(bc.mv); }
-  afterStockChange();
+  const bc=brokerCashItem(); if(bc){ bc.mv=Math.round((bc.mv||0)+sh*sellPx); saveBrokerCash(bc.mv); }
+  if(soldOut){
+    // 清仓：本地删除整行 + Sheet 删除整行
+    const g=DATA.stock.groups[curStock.gi];
+    g.holdings.splice(curStock.hi,1);
+    afterStockChange();
+    pushToSheet({action:'deleteStock', symbol:sym});
+  }else{
+    it.shares=it.shares-sh;   // 成本不变
+    if(px>0) it.price=px;
+    afterStockChange();
+    syncStockToSheet(it);
+  }
+  syncCashToSheet();
 }
 function applyPrice(){
   const it=stockItem();
-  const px=parseFloat(document.getElementById('s-price').value);
-  if(px>0) it.price=px;
+  const c=parseFloat(document.getElementById('s-price').value);
+  if(!(c>0)){ alert('\u8bf7\u8f93\u5165\u6709\u6548\u6210\u672c\u4ef7'); return; }
+  it.cost=c;
   afterStockChange();
+  syncStockToSheet(it);
 }
 function afterStockChange(){
   persistStock();
@@ -1631,6 +1676,7 @@ function editBrokerCash(){
   if(bc) bc.mv=Math.round(n);
   recompute();
   openDetail('stock');
+  syncCashToSheet();
 }
 
 
@@ -1688,6 +1734,15 @@ function submitBuyStock(){
   persistStock();
   recompute();
   openDetail('stock');
+  // 写回 Sheet：已存在则更新，否则新增
+  const sheetCat=(STOCK_TAXONOMY.find(function(t){return t.cat===cat;})||{}).sheet||'Other ETF';
+  if(existing){
+    syncStockToSheet(existing);
+  }else{
+    pushToSheet({action:'addStock', symbol:sym, category:sheetCat,
+                 shares:Number(sh.toFixed(4)), cost:Number(cost.toFixed(4))});
+  }
+  syncCashToSheet();
 }
 
 function go(id){
