@@ -12,7 +12,8 @@
     --line:#e2e5ea; --pos:#1a7f37; --neg:#c9314a; --radius:16px;
 
     /* 每大类：主色(icon/强调) + 浅底 + 边框。文字统一深色 */
-    --stock:#2f6fed;  --stock-bg:#e8f0fe;  --stock-ln:#c7dbfb;
+    --stock:#2f6fed;  --stock-bg:#e8f0fe;  --stock-ln:#c7dbfb;  --stock-head:#f0f5ff;  /* 更浅的蓝·标题 */
+    --grphead-bg:#f0f1f3;  /* 浅灰色·大类标题底 */
     --cd:#9333ea;     --cd-bg:#f3e9fd;     --cd-ln:#e3cdfa;
     --bond:#c2820a;   --bond-bg:#fbf1d9;   --bond-ln:#f2e0af;
     --cash:#1a9d4a;   --cash-bg:#e3f6ea;   --cash-ln:#c2ecd1;
@@ -76,8 +77,8 @@
   .dhero .v{font-size:32px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;color:var(--ink-2);}
   .dhero .v .cur{font-size:16px;color:var(--ink-faint);margin-right:3px;vertical-align:4px;}
   .dhero .s{font-size:12px;color:var(--ink-2);margin-top:6px;font-weight:500;}
-  .group{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-bottom:12px;}
-  .grp-head{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);}
+  .group{border:1px solid var(--stock-ln);border-radius:var(--radius);overflow:hidden;margin-bottom:14px;}
+  .grp-head{display:flex;align-items:center;gap:10px;padding:12px 15px;background:var(--grphead-bg);border-bottom:1px solid var(--stock-ln);}
   .grp-head .cat{flex:1;font-size:13px;font-weight:600;color:var(--ink);}
   .grp-head .cat .sub{display:block;font-size:11px;color:var(--ink-faint);font-weight:400;margin-top:2px;}
   .grp-head .gpc{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;}
@@ -154,12 +155,33 @@
   .expcell .nm{font-size:12px;font-weight:600;color:var(--ink);line-height:1.25;min-height:30px;}
   .expcell .amt{font-size:17px;font-weight:650;color:var(--ink);margin-top:4px;font-variant-numeric:tabular-nums;}
   .expcell .pc{font-size:10px;color:var(--ink-faint);margin-top:2px;font-variant-numeric:tabular-nums;}
+
+  /* 国债利息弹窗 */
+  .imodal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:999;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .imodal{background:var(--card);border-radius:20px;padding:22px 20px;max-width:340px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.2);}
+  .imodal h3{margin:0 0 6px;font-size:17px;color:var(--ink);}
+  .imodal p{margin:0 0 16px;font-size:14px;color:var(--ink-2);line-height:1.5;}
+  .imodal .amt-big{font-size:24px;font-weight:700;color:var(--bond);margin:8px 0 14px;}
+  .imodal .choice{display:flex;gap:10px;}
+  .imodal .choice button{flex:1;padding:13px;border:none;border-radius:12px;font-size:15px;font-weight:600;
+    font-family:inherit;cursor:pointer;color:#fff;}
+
+  /* ===== 详情页大类卡片（干净版，仿主页风格）===== */
+  .stkgroup{border:1px solid var(--stock-ln);border-radius:var(--radius);overflow:hidden;margin-bottom:14px;}
+  .stkgroup-head{display:flex;align-items:center;gap:10px;padding:12px 14px;}
+  .stkbar{width:4px;align-self:stretch;border-radius:3px;flex:none;min-height:20px;}
+  .stkcat{flex:1;font-size:14px;font-weight:600;color:var(--ink);}
+  .stkcat .stksub{display:block;font-size:11px;color:var(--ink-faint);font-weight:400;margin-top:2px;}
+  .stkpc{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;}
+  .stkrows .row{background:#F8FAFC;border-top:1px solid rgba(0,0,0,.05);padding:9px 14px;}
+  .stkrows .swipe-row{background:transparent;}
   .foot{text-align:center;font-size:11px;color:var(--ink-faint);margin-top:24px;line-height:1.6;}
   .foot .badge{display:inline-block;background:#e6e9ee;border:1px solid var(--line);border-radius:6px;
     padding:3px 8px;color:var(--ink-2);margin-bottom:8px;font-variant-numeric:tabular-nums;font-weight:400;}
 </style>
 </head>
 <body>
+<div id="bondModalMount"></div>
 
 <div class="screen active" id="scr-overview">
   <header>
@@ -222,46 +244,7 @@ const ASOF = new Date().toISOString().slice(0,10);
 const DATA = {
   stock: {
     name:"\u80a1\u7968", color:"var(--stock)", key:"stock", meta:"Webull \u00b7 \u542b\u73b0\u91d1/BTC/RSU",
-    groups:[
-      { cat:"\u534a\u5bfc\u4f53 / AI \u786c\u4ef6", sub:"\u6700\u5927\u96c6\u4e2d\u98ce\u9669", semi:true, holdings:[
-        {sym:"ASMI", shares:25, cost:880.83, price:956.80, desc:"\u96c7\u4e3b\u80a1\u00b7\u5df2\u5f52\u5c5e"},
-        {sym:"TSM",  shares:27, cost:182.21, price:404.00, desc:"\u53f0\u79ef\u7535\u00b7\u4ee3\u5de5"},
-        {sym:"NVDA", shares:32, cost:148.71, price:198.95, desc:"\u82f1\u4f1f\u8fbe\u00b7\u82af\u7247"},
-        {sym:"MU",   shares:6,  cost:387.01, price:812.48, desc:"\u7f8e\u5149\u00b7\u5b58\u50a8"},
-      ]},
-      { cat:"\u5927\u76d8\u6307\u6570 ETF", sub:"\u6807\u666e500\u6838\u5fc3", holdings:[
-        {sym:"VOO", shares:11.9, cost:679.14, price:684.73, desc:"Vanguard \u6807\u666e500"},
-        {sym:"SPY", shares:10,   cost:519.48, price:744.18, desc:"SPDR \u6807\u666e500\u00b7\u8001\u4ed3"},
-      ]},
-      { cat:"\u5176\u4ed6\u79d1\u6280\u4e2a\u80a1", sub:"", holdings:[
-        {sym:"GOOG", shares:40, cost:171.40, price:354.37, desc:"Alphabet"},
-      ]},
-      { cat:"\u6d88\u8d39", sub:"", holdings:[
-        {sym:"COST", shares:10, cost:767.08, price:951.74, desc:"Costco"},
-      ]},
-      { cat:"\u533b\u7597 ETF", sub:"\u9632\u5fa1\u00b7\u4f4eAI\u76f8\u5173", holdings:[
-        {sym:"VHT", shares:15, cost:306.83, price:307.00, desc:"Vanguard \u533b\u7597"},
-      ]},
-      { cat:"\u56fd\u9645\u80a1\u7968 ETF", sub:"\u975e\u7f8e\u5206\u6563", holdings:[
-        {sym:"VEA",  shares:50, cost:58.99, price:70.60, desc:"\u53d1\u8fbe\u5e02\u573a\u00b7\u9664\u7f8e"},
-        {sym:"VXUS", shares:37, cost:85.43, price:84.58, desc:"\u5168\u7403\u9664\u7f8e\u00b7\u542b\u65b0\u5174"},
-      ]},
-      { cat:"\u4ef7\u503c / \u5c0f\u76d8\u4ef7\u503c", sub:"\u5e73\u8861\u6210\u957f\u503e\u659c", holdings:[
-        {sym:"AVUV", shares:25, cost:121.66, price:125.31, desc:"\u7f8e\u56fd\u5c0f\u76d8\u4ef7\u503c"},
-        {sym:"AVLV", shares:10, cost:91.55, price:92.25, desc:"\u7f8e\u56fd\u5927\u76d8\u4ef7\u503c"},
-      ]},
-      { cat:"\u4e3b\u9898 ETF", sub:"\u56fd\u9632/\u80fd\u6e90/\u592a\u7a7a", holdings:[
-        {sym:"PPA",  shares:20, cost:173.24, price:172.25, desc:"\u822a\u7a7a\u56fd\u9632"},
-        {sym:"GRID", shares:10, cost:191.20, price:179.35, desc:"\u667a\u80fd\u7535\u7f51"},
-        {sym:"NLR",  shares:15, cost:129.33, price:106.36, desc:"\u6838\u80fd\u00b7\u94c0"},
-        {sym:"SPCX", shares:8,  cost:155.63, price:107.77, desc:"SpaceX\u00b7\u592a\u7a7a"},
-      ]},
-      { cat:"\u9ec4\u91d1 \u00b7 \u52a0\u5bc6 \u00b7 \u73b0\u91d1", sub:"\u4fdd\u9669\u4e0e\u5f85\u6295\u8d44\u5b50\u5f39", holdings:[
-        {sym:"IAU", shares:30, cost:77.53, price:76.75, desc:"\u9ec4\u91d1"},
-        {sym:"BTC", shares:0.0383, cost:64360, price:64360, desc:"\u6bd4\u7279\u5e01"},
-        {sym:"\u73b0\u91d1", noprice:true, mv:4100, desc:"\u5238\u5546\u53ef\u7528\u00b7\u4e70\u5165\u65f6\u6263\u51cf"},
-      ]},
-    ]
+    groups:[]  // 初始为空，启动时由 localStorage 或 Google Sheet 填充（见 syncStockFromSheet）
   },
   cd: {
     name:"\u50a8\u84c4", color:"var(--cd)", key:"cd", meta:"Marcus \u00b7 \u5b9a\u5b58+\u6d3b\u671f",
@@ -372,44 +355,53 @@ function persistCd(){
 }
 loadCd();
 // ---- 股票：本地存储（股数/成本/现价）----
+function emptyStockGroups(){
+  // 按分类建好空骨架，保证 groups 结构永远存在（防止启动时报错白屏）
+  return GROUP_META.map(function(m){
+    return {cat:m.cat, sub:m.sub, semi:m.semi||false, holdings:[]};
+  });
+}
 function loadStock(){
   try{
     const raw=localStorage.getItem('stockGroups_v2');
-    if(raw){ DATA.stock.groups = JSON.parse(raw); }
-    else{ localStorage.setItem('stockGroups_v2', JSON.stringify(DATA.stock.groups)); }
-  }catch(e){ console.log('stock load',e); }
+    const saved=raw?JSON.parse(raw):null;
+    if(saved && saved.length){ DATA.stock.groups = saved; }
+    else{ DATA.stock.groups = emptyStockGroups(); }
+  }catch(e){
+    console.log('stock load',e);
+    DATA.stock.groups = emptyStockGroups();
+  }
 }
 function persistStock(){ localStorage.setItem('stockGroups_v2', JSON.stringify(DATA.stock.groups)); }
+// 券商现金：独立存储（本地管理，买卖/转账自动增减）
+function loadBrokerCash(){
+  const v=localStorage.getItem('brokerCash_v1');
+  return v!=null ? parseFloat(v) : 2316;   // 默认 2316
+}
+function saveBrokerCash(v){ localStorage.setItem('brokerCash_v1', String(Math.round(v))); }
+const STOCK_TAXONOMY = [
+  {sheet:'Semiconductor',      cat:'\u534a\u5bfc\u4f53 / AI \u786c\u4ef6', sub:'\u6700\u5927\u96c6\u4e2d\u98ce\u9669', semi:true},
+  {sheet:'IndexETF',           cat:'\u5927\u76d8\u6307\u6570 ETF', sub:'\u6807\u666e500\u6838\u5fc3'},
+  {sheet:'Tech/AI',            cat:'\u5176\u4ed6\u79d1\u6280\u4e2a\u80a1', sub:''},
+  {sheet:'Consumer',           cat:'\u6d88\u8d39', sub:''},
+  {sheet:'\u533b\u7597',           cat:'\u533b\u7597 ETF', sub:'\u9632\u5fa1\u00b7\u4f4eAI\u76f8\u5173'},
+  {sheet:'International ETF',   cat:'\u56fd\u9645\u80a1\u7968 ETF', sub:'\u975e\u7f8e\u5206\u6563'},
+  {sheet:'Value ETF',          cat:'\u4ef7\u503c / \u5c0f\u76d8\u4ef7\u503c', sub:'\u5e73\u8861\u6210\u957f\u503e\u659c'},
+  {sheet:'Other ETF',          cat:'\u4e3b\u9898 ETF', sub:'\u56fd\u9632/\u80fd\u6e90/\u592a\u7a7a'},
+  {sheet:'Gold.coin',          cat:'\u9ec4\u91d1 \u00b7 \u52a0\u5bc6 \u00b7 \u73b0\u91d1', sub:'\u4fdd\u9669\u4e0e\u5f85\u6295\u8d44\u5b50\u5f39'}
+];
+// 由 taxonomy 派生
+const CAT_MAP = {}; STOCK_TAXONOMY.forEach(function(t){ CAT_MAP[t.sheet]=t.cat; });
+const GROUP_META = STOCK_TAXONOMY.map(function(t){ return {cat:t.cat, sub:t.sub, semi:t.semi||false}; });
+// symbol -> 中文描述（保留小程序里的说明文字）
+
 loadStock();
 
 // ==================== 从 Google Sheet 读取股票 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
 
 // Sheet 的 category -> 小程序分组的映射
-const CAT_MAP = {
-  'Semiconductor':'\u534a\u5bfc\u4f53 / AI \u786c\u4ef6',
-  'IndexETF':'\u5927\u76d8\u6307\u6570 ETF',
-  'Tech/AI':'\u5176\u4ed6\u79d1\u6280\u4e2a\u80a1',
-  'Consumer':'\u6d88\u8d39',
-  '\u533b\u7597':'\u533b\u7597 ETF',
-  'International ETF':'\u56fd\u9645\u80a1\u7968 ETF',
-  'Value ETF':'\u4ef7\u503c / \u5c0f\u76d8\u4ef7\u503c',
-  'Other ETF':'\u4e3b\u9898 ETF',
-  'Gold.coin':'\u9ec4\u91d1 \u00b7 \u52a0\u5bc6 \u00b7 \u73b0\u91d1'
-};
-// 小程序里各分组的固定顺序、子标题、是否半导体
-const GROUP_META = [
-  {cat:'\u534a\u5bfc\u4f53 / AI \u786c\u4ef6', sub:'\u6700\u5927\u96c6\u4e2d\u98ce\u9669', semi:true},
-  {cat:'\u5927\u76d8\u6307\u6570 ETF', sub:'\u6807\u666e500\u6838\u5fc3'},
-  {cat:'\u5176\u4ed6\u79d1\u6280\u4e2a\u80a1', sub:''},
-  {cat:'\u6d88\u8d39', sub:''},
-  {cat:'\u533b\u7597 ETF', sub:'\u9632\u5fa1\u00b7\u4f4eAI\u76f8\u5173'},
-  {cat:'\u56fd\u9645\u80a1\u7968 ETF', sub:'\u975e\u7f8e\u5206\u6563'},
-  {cat:'\u4ef7\u503c / \u5c0f\u76d8\u4ef7\u503c', sub:'\u5e73\u8861\u6210\u957f\u503e\u659c'},
-  {cat:'\u4e3b\u9898 ETF', sub:'\u56fd\u9632/\u80fd\u6e90/\u592a\u7a7a'},
-  {cat:'\u9ec4\u91d1 \u00b7 \u52a0\u5bc6 \u00b7 \u73b0\u91d1', sub:'\u4fdd\u9669\u4e0e\u5f85\u6295\u8d44\u5b50\u5f39'}
-];
-// symbol -> 中文描述（保留小程序里的说明文字）
+// 股票分类的唯一数据源：Sheet类别 -> {小程序组名, 子标题, 是否半导体}
 const SYM_DESC = {
   ASMI:'\u96c7\u4e3b\u80a1\u00b7\u5df2\u5f52\u5c5e', ASMIY:'\u96c7\u4e3b\u80a1\u00b7\u5df2\u5f52\u5c5e',
   TSM:'\u53f0\u79ef\u7535\u00b7\u4ee3\u5de5', NVDA:'\u82f1\u4f1f\u8fbe\u00b7\u82af\u7247', MU:'\u7f8e\u5149\u00b7\u5b58\u50a8',
@@ -448,11 +440,7 @@ function rebuildStockGroups(rows){
     if(sym.toLowerCase()==='cash' || sym==='\u73b0\u91d1'){
       const g = groupByCat['\u9ec4\u91d1 \u00b7 \u52a0\u5bc6 \u00b7 \u73b0\u91d1'];
       // 保留已有的券商现金金额（从旧数据找），否则用0
-      let cashMv = 0;
-      DATA.stock.groups.forEach(function(og){ og.holdings.forEach(function(hh){
-        if(hh.noprice && (hh.sym==='\u73b0\u91d1')) cashMv=hh.mv||0;
-      });});
-      g.holdings.push({sym:'\u73b0\u91d1', noprice:true, mv:cashMv, desc:'\u5238\u5546\u53ef\u7528\u00b7\u4e70\u5165\u65f6\u6263\u51cf'});
+      g.holdings.push({sym:'\u73b0\u91d1', noprice:true, mv:loadBrokerCash(), desc:'\u5238\u5546\u53ef\u7528\u00b7\u53ef\u70b9\u51fb\u7f16\u8f91'});
       return;
     }
     const rawCat = (row.category||'').toString().trim();
@@ -567,19 +555,77 @@ function loadBond(){
   }catch(e){ console.log('bond load err',e); }
 }
 function persistBond(){ localStorage.setItem('bondList_v2', JSON.stringify(DATA.bond.groups[0].holdings)); }
+// 根据起始日+期限算到期日
+function calcMaturity(startStr, termYears){
+  if(!startStr||!termYears) return '';
+  const d=new Date(startStr+'T00:00:00');
+  d.setFullYear(d.getFullYear()+parseInt(termYears));
+  return d.toISOString().slice(0,10);
+}
+// 待处理的国债利息弹窗队列
+let bondInterestQueue = [];
 function rollBond(item){
-  if(item.baseMv==null){ item.baseMv=item.mv||0; item.updated=item.updated||'2026-07-31'; item.rate=item.rate||0; }
-  const start=new Date(item.updated+'T00:00:00');
+  // 兼容旧数据
+  if(item.baseMv==null){ item.baseMv=item.mv||0; }
+  if(!item.start){ item.start=item.updated||'2026-07-31'; }
+  if(!item.term){ item.term=1; }
+  if(!item.btype){ item.btype='T-Note'; }
+  item.mat = calcMaturity(item.start, item.term);
   const today=new Date(); today.setHours(0,0,0,0);
-  const days=daysBetween(start,today);
-  const years=days/365;
-  const interest=item.baseMv*(item.rate/100)*years;   // 简单年息
-  item.mv=Math.round(item.baseMv+interest);
-  item.qty=(item.rate?item.rate+'%':'');
-  item.desc=(item.mat?('\u5230\u671f '+item.mat.replace(/-/g,'/')):'')+(interest>=1?('  \u00b7  \u4f30\u606f +$'+interest.toFixed(0)):'');
+  const start=new Date(item.start+'T00:00:00');
+
+  if(item.btype==='I-Bond'){
+    // I-Bond：每半年复利一次，利息累加进余额（不转现金）
+    if(item.lastCompound==null) item.lastCompound=item.start;
+    let last=new Date(item.lastCompound+'T00:00:00');
+    let bal=item.mv!=null?item.mv:item.baseMv;
+    let compounded=false;
+    while(true){
+      const next=new Date(last); next.setMonth(next.getMonth()+6);
+      if(next<=today){
+        bal = bal * (1 + (item.rate/100)/2);   // 半年复利
+        last = next; compounded=true;
+      } else break;
+    }
+    if(compounded){ item.mv=Math.round(bal); item.lastCompound=last.toISOString().slice(0,10); }
+    else if(item.mv==null){ item.mv=item.baseMv; }
+    item.qty=(item.rate?item.rate+'%':'');
+    item.desc='I-Bond \u00b7 '+(item.mat?('\u5230\u671f '+item.mat.replace(/-/g,'/')):'');
+  } else if(item.btype==='T-Bill'){
+    // T-Bill：到期一次性兑付，期间余额不变（折价收益略过）
+    item.mv=item.baseMv;
+    item.qty=(item.rate?item.rate+'%':'');
+    item.desc='T-Bill \u00b7 '+(item.mat?('\u5230\u671f '+item.mat.replace(/-/g,'/')):'');
+  } else {
+    // T-Note：每半年生成利息（本金×利率÷2），排队弹窗转现金
+    item.mv=item.baseMv;  // 本金不变，利息是打出去的
+    if(item.lastCoupon==null) item.lastCoupon=item.start;
+    let last=new Date(item.lastCoupon+'T00:00:00');
+    while(true){
+      const next=new Date(last); next.setMonth(next.getMonth()+6);
+      if(next<=today){
+        const amt=Math.round(item.baseMv*(item.rate/100)/2);
+        if(amt>0){
+          bondInterestQueue.push({
+            label:'T-Note '+item.term+'Y',
+            amount:amt,
+            date:next.toISOString().slice(0,10)
+          });
+        }
+        last=next;
+      } else break;
+    }
+    item.lastCoupon=last.toISOString().slice(0,10);
+    item.qty=(item.rate?item.rate+'%':'');
+    item.desc='T-Note \u00b7 '+(item.mat?('\u5230\u671f '+item.mat.replace(/-/g,'/')):'');
+  }
   return item;
 }
-function rollAllBond(){ DATA.bond.groups[0].holdings.forEach(rollBond); }
+function rollAllBond(){
+  bondInterestQueue=[];
+  DATA.bond.groups[0].holdings.forEach(rollBond);
+  persistBond();
+}
 loadBond(); rollAllBond();
 
 // ---- 401k 自动增长（每月：+缴款，+按年化的月回报）----
@@ -619,7 +665,7 @@ function hmv(h){
   if(h.shares!=null && h.price!=null){ h.mv=h.shares*h.price; return h.mv; }
   return h.mv||0;
 }
-const sumH = g => g.holdings.reduce((s,h)=>s+hmv(h),0);
+const sumH = g => (g && g.holdings) ? g.holdings.reduce((s,h)=>s+hmv(h),0) : 0;
 const sumC = c => c.groups.reduce((s,g)=>s+sumH(g),0);
 const classTotal={}; let grand=0;
 ALL.forEach(k=>{classTotal[k]=sumC(DATA[k]);});
@@ -627,7 +673,7 @@ ORDER.forEach(k=>{grand+=classTotal[k];});
 const stockTotal=classTotal.stock;
 const semiGroup=DATA.stock.groups.find(g=>g.semi);
 const semiTotal=sumH(semiGroup);
-const semiPc=semiTotal/stockTotal*100;
+const semiPc=stockTotal>0?(semiTotal/stockTotal*100):0;
 
 document.getElementById('asof').textContent=ASOF;
 document.getElementById('total').textContent=fmt(grand);
@@ -711,53 +757,60 @@ function openDetail(k){
     '<div class="l" style="color:'+c.color+'">'+c.meta+'</div>'+
     '<div class="v num"><span class="cur">$</span>'+fmt(t)+'</div>'+
     '<div class="s">'+(ORDER.includes(k)?('\u5360\u6295\u8d44\u603b\u989d '+(t/grand*100).toFixed(1)+'%'):'\u7a0e\u4f18\u8d26\u6237 \u00b7 \u4e0d\u8ba1\u5165\u6295\u8d44\u603b\u989d')+'</div></div>';
-  c.groups.forEach((g,gi)=>{
-    if(k==='cash') return;  // 现金页不显示持仓组，改用收入/支出tab
-    const gt=sumH(g);
-    html+='<div class="group" style="background:var(--'+k+'-bg);border-color:var(--'+k+'-ln)"><div class="grp-head" style="border-color:var(--'+k+'-ln)">'+
-      '<div class="cat">'+g.cat+(g.sub?'<span class="sub">'+g.sub+'</span>':'')+'</div>'+
-      '<span class="gpc" style="color:'+(g.semi?'var(--neg)':c.color)+'">'+(gt/t*100).toFixed(1)+'%</span></div>'+
-      g.holdings.map(function(hh,hi){
-        // ---- 股票行：股数 | 成本/利润% | 市值/占比 ----
-        if(k==='stock' && !hh.noprice && hh.shares!=null){
-          var mv=hmv(hh);
-          var prof=(hh.price-hh.cost)/hh.cost*100;
-          var profCol=isFinite(prof)?((prof>=0?'+':'')+prof.toFixed(1)+'%'):'';
-          var profColor=prof>=0?'var(--pos)':'var(--neg)';
-          var sInner='<div class="tk"><div class="sym">'+hh.sym+'</div>'+
-              '<div class="qty">'+(hh.shares%1?hh.shares.toFixed(3):hh.shares)+'\u80a1</div></div>'+
-            '<div class="scost"><div class="ac">$'+hh.cost.toFixed(2)+'</div>'+
-              '<div class="pr" style="color:'+profColor+'">'+profCol+'</div></div>'+
-            '<div class="val"><div class="mv">$'+fmt(mv)+'</div>'+
-              '<div class="pc">'+(mv/t*100).toFixed(1)+'%</div></div>';
-          return '<div class="swipe"><div class="swipe-del" onclick="deleteStock('+gi+','+hi+')">\u5220\u9664</div>'+
-            '<div class="row swipe-row" style="background:var(--stock-bg);border-color:var(--stock-ln)" '+
-            'onclick="showStockPanel('+gi+','+hi+')">'+sInner+'</div></div>'+
-            '<div class="stock-slot" id="slot-'+gi+'-'+hi+'"></div>';
-        }
-        // 现金等无价条目
-        var inner='<div class="tk"><div class="sym">'+hh.sym+'</div><div class="qty">'+(hh.qty||'')+'</div></div>'+
-          '<div class="desc">'+hh.desc+'</div>'+
-          '<div class="val"><div class="mv">$'+fmt(hmv(hh))+'</div>'+
-          '<div class="pc">'+(hmv(hh)/t*100).toFixed(1)+'%</div></div>';
-        if(k==='cd' || k==='bond'){
-          var delFn = k==='cd'?'deleteCd':'deleteBond';
-          var editFn = k==='cd'?'editCd':'editBond';
-          return '<div class="swipe"><div class="swipe-del" onclick="'+delFn+'('+hi+')">\u5220\u9664</div>'+
-            '<div class="row swipe-row" style="background:var(--'+k+'-bg);border-color:var(--'+k+'-ln)" '+
-            'onclick="'+editFn+'('+hi+')">'+inner+'</div></div>';
-        }
-        if(k==='retire' && hh.growth){
-          return '<div class="row" style="border-color:var(--'+k+'-ln);cursor:pointer" onclick="show401kForm()">'+inner+'</div>';
-        }
-        if(k==='cash' || k==='hsa'){
-          return '<div class="swipe"><div class="swipe-del" onclick="deleteSimple(\''+k+'\','+hi+')">\u5220\u9664</div>'+
-            '<div class="row swipe-row" style="background:var(--'+k+'-bg);border-color:var(--'+k+'-ln)" '+
-            'onclick="editSimple(\''+k+'\','+hi+')">'+inner+'</div></div>';
-        }
-        return '<div class="row" style="border-color:var(--'+k+'-ln)">'+inner+'</div>';
-      }).join('')
-      '</div>';
+  c.groups.forEach(function(g,gi){
+    if(k==='cash') return;  // 现金页用收入/支出tab
+    if(!g.holdings || g.holdings.length===0) return;  // 跳过空组（不渲染空壳）
+    var gt=sumH(g);
+    var accent = g.semi?'var(--neg)':c.color;
+
+    // 组内所有行的 HTML
+    var rowsHtml = g.holdings.map(function(hh,hi){
+      // 股票行：股数 | 成本/利润% | 市值/占比
+      if(k==='stock' && !hh.noprice && hh.shares!=null){
+        var mv=hmv(hh);
+        var prof=(hh.price-hh.cost)/hh.cost*100;
+        var profCol=isFinite(prof)?((prof>=0?'+':'')+prof.toFixed(1)+'%'):'';
+        var profColor=prof>=0?'var(--pos)':'var(--neg)';
+        var sInner='<div class="tk"><div class="sym">'+hh.sym+'</div>'+
+            '<div class="qty">'+(hh.shares%1?hh.shares.toFixed(3):hh.shares)+'\u80a1</div></div>'+
+          '<div class="scost"><div class="ac">$'+hh.cost.toFixed(2)+'</div>'+
+            '<div class="pr" style="color:'+profColor+'">'+profCol+'</div></div>'+
+          '<div class="val"><div class="mv">$'+fmt(mv)+'</div>'+
+            '<div class="pc">'+(mv/t*100).toFixed(1)+'%</div></div>';
+        return '<div class="row" style="cursor:pointer" onclick="showStockPanel('+gi+','+hi+')">'+sInner+'</div>'+
+          '<div class="stock-slot" id="slot-'+gi+'-'+hi+'"></div>';
+      }
+      // 无价条目（券商现金 / CD / 国债 / HSA / 退休）
+      var inner='<div class="tk"><div class="sym">'+hh.sym+'</div><div class="qty">'+(hh.qty||'')+'</div></div>'+
+        '<div class="desc">'+hh.desc+'</div>'+
+        '<div class="val"><div class="mv">$'+fmt(hmv(hh))+'</div>'+
+        '<div class="pc">'+(hmv(hh)/t*100).toFixed(1)+'%</div></div>';
+      if(k==='cd' || k==='bond'){
+        var editFn = k==='cd'?'editCd':'editBond';
+        return '<div class="row" style="cursor:pointer" onclick="'+editFn+'('+hi+')">'+inner+'</div>';
+      }
+      if(k==='retire' && hh.growth){
+        return '<div class="row" style="cursor:pointer" onclick="show401kForm()">'+inner+'</div>';
+      }
+      if(k==='hsa'){
+        return '<div class="row" style="cursor:pointer" onclick="editSimple(\''+k+'\','+hi+')">'+inner+'</div>';
+      }
+      if(hh.noprice && hh.sym==='\u73b0\u91d1'){
+        return '<div class="row" style="cursor:pointer" onclick="editBrokerCash()">'+inner+'</div>';
+      }
+      return '<div class="row">'+inner+'</div>';
+    }).join('');
+
+    // 一个大类 = 一张独立卡片（浅色标题 + 彩色左条 + 明细行）
+    var headBg = (k==='stock') ? 'var(--stock-head)' : 'var(--'+k+'-bg)';
+    html+='<div class="stkgroup" style="background:var(--'+k+'-bg);border-color:var(--'+k+'-ln)">'+
+      '<div class="stkgroup-head" style="background:'+headBg+'">'+
+        '<span class="stkbar" style="background:'+accent+'"></span>'+
+        '<div class="stkcat">'+g.cat+(g.sub?'<span class="stksub">'+g.sub+'</span>':'')+'</div>'+
+        '<span class="stkpc" style="color:'+accent+'">'+(gt/t*100).toFixed(1)+'%</span>'+
+      '</div>'+
+      '<div class="stkrows">'+rowsHtml+'</div>'+
+    '</div>';
   });
 
   if(k==='cd'){
@@ -769,15 +822,17 @@ function openDetail(k){
   if(k==='hsa'){
     html+='<div id="simpleAddWrap"></div>';
   }
+  if(k==='stock'){
+    html+='<div id="stockAddWrap"></div>';
+  }
   if(c.ledger){
     html+='<div id="incomeWrap"></div>';
   }
-  html+='<div class="placeholder" style="margin-top:12px"><b>\u7f16\u8f91 \u00b7 \u5feb\u7167</b><br>'+
-    '\u4e4b\u540e\u53ef\u5728\u6b64\u589e\u6539\u6301\u4ed3\uff0c\u6bcf\u6708\u5e95\u81ea\u52a8\u5b58\u5feb\u7167\u4f9b\u5386\u53f2\u5bf9\u6bd4\u3002</div>';
+
   body.innerHTML=html;
   if(k==='cd'){ renderCdAdd(); attachSwipe(); }
   if(k==='bond'){ renderBondAdd(); attachSwipe(); }
-  if(k==='stock'){ attachSwipe(); }
+  if(k==='stock'){ attachSwipe(); renderStockAdd(); }
   if(k==='hsa'){ renderSimpleAdd('hsa'); attachSwipe(); }
   if(k==='cash'){ attachSwipe(); }
   if(k==='cash'){ renderIncome(); }
@@ -931,15 +986,16 @@ function recompute(){
   ALL.forEach(k=>{classTotal[k]=sumC(DATA[k]);});
   ORDER.forEach(k=>{grand+=classTotal[k];});
   document.getElementById('total').textContent=fmt(grand);
+  const safeGrand = grand>0 ? grand : 1;  // 避免总额为0时除0出错
   const bar=document.getElementById('allocbar'); bar.innerHTML='';
   ORDER.forEach(k=>{const s=document.createElement('span');
-    s.style.width=(classTotal[k]/grand*100)+'%';s.style.background=DATA[k].color;bar.appendChild(s);});
+    s.style.width=(classTotal[k]/safeGrand*100)+'%';s.style.background=DATA[k].color;bar.appendChild(s);});
   document.querySelectorAll('#classlist .ccard').forEach((card,i)=>{
     const k=ALL[i], t=classTotal[k];
     if(k==null) return;
     card.querySelector('.amt .mv').textContent='$'+fmt(t);
     const pcEl=card.querySelector('.amt .pc');
-    if(ORDER.includes(k)) pcEl.textContent=(t/grand*100).toFixed(1)+'%';
+    if(ORDER.includes(k)) pcEl.textContent=(t/safeGrand*100).toFixed(1)+'%';
   });
 }
 
@@ -1012,17 +1068,28 @@ function renderBondAdd(){
 }
 function bondFormHtml(vals){
   vals=vals||{};
+  const selStyle='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  const btype=vals.btype||'T-Note';
+  const term=vals.term||3;
+  function typeOpt(v){ return '<option value="'+v+'"'+(btype===v?' selected':'')+'>'+v+'</option>'; }
+  function termOpt(v){ return '<option value="'+v+'"'+(parseInt(term)===v?' selected':'')+'>'+v+'\u5e74</option>'; }
   return '<div class="editform" style="border-color:var(--bond-ln)">'+
-    '<div class="fld"><label>\u540d\u79f0</label>'+
-      '<input id="b-name" value="'+(vals.sym||'')+'" placeholder="\u4f8b\uff1aT-Notes / I Bond" autocomplete="off"></div>'+
-    '<div class="fld"><label>\u91d1\u989d ($) \u00b7 \u5f53\u524d\u771f\u5b9e\u4f59\u989d</label>'+
+    '<div class="fld"><label>\u56fd\u503a\u7c7b\u578b</label>'+
+      '<select id="b-type" style="'+selStyle+'" onchange="onBondTypeChange()">'+
+        typeOpt('I-Bond')+typeOpt('T-Bill')+typeOpt('T-Note')+
+      '</select></div>'+
+    '<div class="fld"><label>\u8d77\u59cb\u65e5</label>'+
+      '<input id="b-start" type="date" value="'+(vals.start||'')+'"></div>'+
+    '<div class="fld"><label>\u671f\u9650</label>'+
+      '<select id="b-term" style="'+selStyle+'">'+
+        termOpt(1)+termOpt(2)+termOpt(3)+termOpt(4)+termOpt(5)+termOpt(10)+termOpt(30)+
+      '</select></div>'+
+    '<div class="fld"><label>\u91d1\u989d ($) \u00b7 \u672c\u91d1</label>'+
       '<input id="b-mv" type="number" inputmode="decimal" value="'+(vals.baseMv!=null?vals.baseMv:'')+'" placeholder="\u4f8b\uff1a10000"></div>'+
-    '<div class="fld"><label>\u5e74\u5229\u7387 (%)</label>'+
+    '<div class="fld"><label>\u5e74\u5229\u7387 (%)'+(btype==='I-Bond'?' \u00b7 \u53ef\u968f\u65f6\u8c03\u6574':'')+'</label>'+
       '<input id="b-rate" type="number" inputmode="decimal" value="'+(vals.rate!=null?vals.rate:'')+'" placeholder="\u4f8b\uff1a3.75"></div>'+
-    '<div class="fld"><label>\u5230\u671f\u65e5</label>'+
-      '<input id="b-mat" type="date" value="'+(vals.mat||'')+'"></div>'+
     '<div class="fld"><label>\u8d44\u91d1\u6765\u6e90</label>'+
-      '<select id="b-src" style="width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit">'+
+      '<select id="b-src" style="'+selStyle+'">'+
         '<option value="">\u65e0\uff08\u4ec5\u8865\u5f55\uff09</option>'+
         '<option value="chase">Checking - Chase</option>'+
         '<option value="marcus">Marcus OS-9250</option>'+
@@ -1032,34 +1099,58 @@ function bondFormHtml(vals){
       '<button class="save" style="background:var(--bond)" onclick="saveBond()">\u4fdd\u5b58</button>'+
     '</div></div>';
 }
+function onBondTypeChange(){
+  // 重新渲染表单以更新利率标签（I-Bond显示可调整）
+  const vals=collectBondForm();
+  const wrap=document.getElementById('bondAddWrap');
+  wrap.innerHTML=bondFormHtml(vals);
+}
+function collectBondForm(){
+  return {
+    btype:document.getElementById('b-type').value,
+    start:document.getElementById('b-start').value,
+    term:document.getElementById('b-term').value,
+    baseMv:document.getElementById('b-mv').value,
+    rate:document.getElementById('b-rate').value
+  };
+}
 function showBondForm(){
   const wrap=document.getElementById('bondAddWrap');
   wrap.innerHTML=bondFormHtml();
-  document.getElementById('b-name').focus();
 }
 function editBond(i){
   editingBondIndex=i;
   const item=DATA.bond.groups[0].holdings[i];
   const wrap=document.getElementById('bondAddWrap');
-  wrap.innerHTML=bondFormHtml({sym:item.sym, baseMv:(item.baseMv!=null?item.baseMv:item.mv), rate:item.rate, mat:item.mat});
+  wrap.innerHTML=bondFormHtml({btype:item.btype, start:item.start, term:item.term, baseMv:(item.baseMv!=null?item.baseMv:item.mv), rate:item.rate});
   wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
 function saveBond(){
-  const name=document.getElementById('b-name').value.trim();
+  const btype=document.getElementById('b-type').value;
+  const start=document.getElementById('b-start').value;
+  const term=document.getElementById('b-term').value;
   const mv=parseFloat(document.getElementById('b-mv').value);
   const rate=parseFloat(document.getElementById('b-rate').value)||0;
-  const mat=document.getElementById('b-mat').value;
-  if(!name || !(mv>0)){ alert('\u8bf7\u81f3\u5c11\u586b\u5199\u540d\u79f0\u548c\u91d1\u989d'); return; }
-  const today=new Date().toISOString().slice(0,10);
-  const item={sym:name, rate:rate, mat:mat, baseMv:Math.round(mv), updated:today};
-  rollBond(item);
-  if(editingBondIndex>=0){ DATA.bond.groups[0].holdings[editingBondIndex]=item; editingBondIndex=-1; }
-  else{
+  if(!start || !(mv>0)){ alert('\u8bf7\u586b\u5199\u8d77\u59cb\u65e5\u548c\u91d1\u989d'); return; }
+  // sym 用类型+期限自动生成（如 T-Note 3Y）
+  const sym=btype+' '+term+'Y';
+  const item={sym:sym, btype:btype, start:start, term:term, rate:rate, baseMv:Math.round(mv),
+              mv:Math.round(mv), lastCompound:start, lastCoupon:start};
+  item.mat=calcMaturity(start,term);
+  if(editingBondIndex>=0){
+    // 编辑时保留已有的 lastCompound/lastCoupon 进度
+    const old=DATA.bond.groups[0].holdings[editingBondIndex];
+    item.lastCompound=old.lastCompound||start;
+    item.lastCoupon=old.lastCoupon||start;
+    item.mv=old.mv!=null?old.mv:item.baseMv;
+    DATA.bond.groups[0].holdings[editingBondIndex]=item;
+    editingBondIndex=-1;
+  } else {
     DATA.bond.groups[0].holdings.push(item);
     const srcEl=document.getElementById('b-src');
     if(srcEl && srcEl.value){ deductSource(srcEl.value, item.baseMv); }
   }
-  persistBond();
+  rollAllBond();
   recompute();
   openDetail('bond');
 }
@@ -1175,7 +1266,7 @@ function applyBuy(){
   it.shares=newShares;
   it.price=px;  // 用最新成交价更新现价
   // 从券商现金扣款
-  const bc=brokerCashItem(); if(bc){ bc.mv=Math.max(0,Math.round((bc.mv||0)-sh*px)); }
+  const bc=brokerCashItem(); if(bc){ bc.mv=Math.max(0,Math.round((bc.mv||0)-sh*px)); saveBrokerCash(bc.mv); }
   afterStockChange();
 }
 function applySell(){
@@ -1187,7 +1278,7 @@ function applySell(){
   it.shares=it.shares-sh;   // 成本不变
   if(px>0) it.price=px;
   // 卖出所得进券商现金
-  const bc=brokerCashItem(); if(bc){ bc.mv=Math.round((bc.mv||0)+sh*(px>0?px:it.price)); }
+  const bc=brokerCashItem(); if(bc){ bc.mv=Math.round((bc.mv||0)+sh*(px>0?px:it.price)); saveBrokerCash(bc.mv); }
   afterStockChange();
 }
 function applyPrice(){
@@ -1300,7 +1391,7 @@ function deductSource(key, amt){
 }
 function addToTarget(key, amt){
   if(key==='broker'){
-    const bc=brokerCashItem(); if(bc){ bc.mv=Math.round((bc.mv||0)+amt); persistStock(); }
+    const bc=brokerCashItem(); if(bc){ bc.mv=Math.round((bc.mv||0)+amt); saveBrokerCash(bc.mv); persistStock(); }
   }else if(key==='mortgage'){
     PROPERTY.loan=Math.max(0, Math.round((PROPERTY.loan!=null?PROPERTY.loan:amortizeNow())-amt));
     PROPERTY.updated=new Date().toISOString().slice(0,10);
@@ -1528,11 +1619,121 @@ function saveBonus(){
   alert('\u5df2\u5165\u8d26 Bonus $'+fmt(amt));
 }
 
+
+function editBrokerCash(){
+  const bc=brokerCashItem();
+  const cur=bc?bc.mv:loadBrokerCash();
+  const v=prompt('\u5238\u5546\u53ef\u7528\u73b0\u91d1 ($)', cur);
+  if(v===null) return;
+  const n=parseFloat(v);
+  if(!(n>=0)){ alert('\u8bf7\u8f93\u5165\u6709\u6548\u91d1\u989d'); return; }
+  saveBrokerCash(n);
+  if(bc) bc.mv=Math.round(n);
+  recompute();
+  openDetail('stock');
+}
+
+
+// ==================== 买入新股票 ====================
+const STOCK_CATS = GROUP_META.map(function(g){ return g.cat; });
+function renderStockAdd(){
+  const wrap=document.getElementById('stockAddWrap');
+  if(!wrap) return;
+  wrap.innerHTML='<button class="save" style="background:var(--stock);width:100%;border:none;border-radius:14px;padding:14px;font-size:15px;font-weight:600;color:#fff;font-family:inherit;cursor:pointer;margin-top:4px" onclick="showBuyStockForm()">+ \u4e70\u5165\u65b0\u80a1\u7968</button><div id="buyStockForm"></div>';
+}
+function showBuyStockForm(){
+  const selStyle='width:100%;padding:14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  const box=document.getElementById('buyStockForm');
+  box.innerHTML=
+    '<div class="editform" style="border-color:var(--stock-ln);margin-top:10px">'+
+      '<div class="fld"><label>\u80a1\u7968\u4ee3\u7801 Symbol</label>'+
+        '<input id="bs-sym" type="text" placeholder="\u4f8b\uff1aNVDA" style="text-transform:uppercase"></div>'+
+      '<div class="fld"><label>\u6210\u672c\u4ef7 ($)</label>'+
+        '<input id="bs-cost" type="number" inputmode="decimal" placeholder="\u4f8b\uff1a150.00"></div>'+
+      '<div class="fld"><label>\u80a1\u6570</label>'+
+        '<input id="bs-sh" type="number" inputmode="decimal" placeholder="\u4f8b\uff1a10"></div>'+
+      '<div class="fld"><label>\u7c7b\u522b</label>'+
+        '<select id="bs-cat" style="'+selStyle+'">'+
+          STOCK_CATS.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('')+
+        '</select></div>'+
+      '<div class="btns">'+
+        '<button class="cancel" onclick="document.getElementById(\'buyStockForm\').innerHTML=\'\'">\u53d6\u6d88</button>'+
+        '<button class="save" style="background:var(--stock)" onclick="submitBuyStock()">\u4e70\u5165</button>'+
+      '</div></div>';
+  document.getElementById('bs-sym').focus();
+}
+function submitBuyStock(){
+  const sym=(document.getElementById('bs-sym').value||'').trim().toUpperCase();
+  const cost=parseFloat(document.getElementById('bs-cost').value);
+  const sh=parseFloat(document.getElementById('bs-sh').value);
+  const cat=document.getElementById('bs-cat').value;
+  if(!sym || !(cost>0) || !(sh>0)){ alert('\u8bf7\u586b\u5199\u4ee3\u7801\u3001\u6210\u672c\u4ef7\u3001\u80a1\u6570'); return; }
+  // 找到对应分组（没有则用第一个）
+  let g=DATA.stock.groups.find(function(x){return x.cat===cat;});
+  if(!g){
+    g={cat:cat, sub:'', semi:(cat===STOCK_CATS[0]), holdings:[]};
+    DATA.stock.groups.push(g);
+  }
+  // 若该股已存在于组内 -> 加权平均
+  let existing=g.holdings.find(function(x){return x.sym===sym;});
+  if(existing){
+    const totSh=existing.shares+sh;
+    existing.cost=(existing.shares*existing.cost+sh*cost)/totSh;
+    existing.shares=totSh;
+  }else{
+    g.holdings.push({sym:sym, shares:sh, cost:cost, price:cost, desc:''});
+  }
+  // 扣券商现金
+  const bc=brokerCashItem(); if(bc){ bc.mv=Math.max(0,Math.round((bc.mv||0)-sh*cost)); saveBrokerCash(bc.mv); }
+  persistStock();
+  recompute();
+  openDetail('stock');
+}
+
 function go(id){
   document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
   document.getElementById('scr-'+id).classList.add('active');
   window.scrollTo(0,0);
 }
+
+// ==================== 国债利息弹窗（T-Note 半年付息）====================
+function showBondInterestPopups(){
+  if(!bondInterestQueue || bondInterestQueue.length===0) return;
+  processNextBondInterest();
+}
+function processNextBondInterest(){
+  if(bondInterestQueue.length===0){ 
+    document.getElementById('bondModalMount').innerHTML=''; 
+    recompute();
+    return; 
+  }
+  const item=bondInterestQueue[0];
+  const mount=document.getElementById('bondModalMount');
+  mount.innerHTML=
+    '<div class="imodal-bg"><div class="imodal">'+
+      '<h3>\u56fd\u503a\u5229\u606f\u5230\u8d26</h3>'+
+      '<p>\u56fd\u503a '+item.label+' \u751f\u6210\u5229\u606f\uff08'+item.date.replace(/-/g,'/')+'\uff09</p>'+
+      '<div class="amt-big">$'+fmt(item.amount)+'</div>'+
+      '<p>\u8bf7\u9009\u62e9\u5b58\u5165\u54ea\u4e2a\u73b0\u91d1\u8d26\u6237\uff1a</p>'+
+      '<div class="choice">'+
+        '<button style="background:#1a9d4a" onclick="acceptBondInterest(\'chase\')">Chase</button>'+
+        '<button style="background:#7c3aed" onclick="acceptBondInterest(\'marcus\')">Marcus</button>'+
+      '</div>'+
+    '</div></div>';
+}
+function acceptBondInterest(dest){
+  const item=bondInterestQueue.shift();
+  if(item){
+    if(dest==='chase'){ addToChase(item.amount); }
+    else if(dest==='marcus'){
+      const m=getSource('marcus');
+      if(m){ if(m.baseMv!=null){ m.baseMv=Math.round(m.baseMv+item.amount);} else { m.mv=Math.round((m.mv||0)+item.amount);} persistCd(); }
+    }
+  }
+  processNextBondInterest();
+}
+showBondInterestPopups();
+
 </script>
 </body>
 </html>
