@@ -1242,19 +1242,20 @@ function showStockPanel(gi,hi){
 function closeStockPanel(){ const w=document.getElementById('slot-'+curStock.gi+'-'+curStock.hi); if(w) w.innerHTML=''; }
 
 // ==================== 写回 Google Sheet ====================
+// 用 no-cors 发送：Apps Script 的 POST 会内部跳转，普通模式会被浏览器判为跨域失败。
+// no-cors 下请求照常送达 Sheet，只是拿不到回执（属正常，不代表失败）。
 function pushToSheet(payload){
   return fetch(SHEET_API, {
     method:'POST',
+    mode:'no-cors',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
     body: JSON.stringify(payload)
-  }).then(function(r){ return r.json(); })
-    .then(function(res){
-      if(res && res.status!=='success'){ console.log('sheet write warn:', res.message); }
-      return res;
-    })
-    .catch(function(e){
-      console.log('sheet write failed', e);
-      alert('\u5df2\u5728\u672c\u5730\u66f4\u65b0\uff0c\u4f46\u540c\u6b65\u5230 Sheet \u5931\u8d25\uff08\u7f51\u7edc\u95ee\u9898\uff09');
-    });
+  }).then(function(){
+    console.log('sheet write sent:', payload.action, payload.symbol||'');
+  }).catch(function(e){
+    console.log('sheet write failed', e);
+    alert('\u5df2\u5728\u672c\u5730\u66f4\u65b0\uff0c\u4f46\u540c\u6b65\u5230 Sheet \u5931\u8d25\uff08\u7f51\u7edc\u95ee\u9898\uff09');
+  });
 }
 function syncStockToSheet(it){
   if(!it) return;
