@@ -700,6 +700,7 @@ function buildCard(k, counted, isLast){
   const c=DATA[k], t=classTotal[k];
   const card=document.createElement('div');
   card.className='ccard';
+  card.dataset.key=k;   // 关键：把类别名挂到卡片上，让 recompute 能按类别找到卡片
   card.style.background='var(--'+k+'-bg)';
   card.onclick=()=>openDetail(k);
   const right = counted
@@ -1000,12 +1001,15 @@ function recompute(){
   const bar=document.getElementById('allocbar'); bar.innerHTML='';
   ORDER.forEach(k=>{const s=document.createElement('span');
     s.style.width=(classTotal[k]/safeGrand*100)+'%';s.style.background=DATA[k].color;bar.appendChild(s);});
-  document.querySelectorAll('#classlist .ccard').forEach((card,i)=>{
-    const k=ALL[i], t=classTotal[k];
-    if(k==null) return;
-    card.querySelector('.amt .mv').textContent='$'+fmt(t);
+  // 按每张卡的 data-key 找到自己对应的类别，避免按位置回填导致错位
+  document.querySelectorAll('#classlist .ccard').forEach(function(card){
+    const k=card.dataset.key;
+    if(!k || !ALL.includes(k)) return;
+    const t=classTotal[k];
+    const mvEl=card.querySelector('.amt .mv');
+    if(mvEl) mvEl.textContent='$'+fmt(t);
     const pcEl=card.querySelector('.amt .pc');
-    if(ORDER.includes(k)) pcEl.textContent=(t/safeGrand*100).toFixed(1)+'%';
+    if(pcEl && ORDER.includes(k)) pcEl.textContent=(t/safeGrand*100).toFixed(1)+'%';
   });
 }
 
