@@ -16,8 +16,8 @@
     --grphead-bg:#f0f1f3;  /* 浅灰色·大类标题底 */
     --cd:#9333ea;     --cd-bg:#f3e9fd;     --cd-ln:#e3cdfa;
     --bond:#c2820a;   --bond-bg:#fbf1d9;   --bond-ln:#f2e0af;
-    --cash:#1a9d4a;   --cash-bg:#e3f6ea;   --cash-ln:#c2ecd1;
-    --retire:#0d9488; --retire-bg:#dcf5f2; --retire-ln:#b6e9e3;
+    --cash:#7C9070;   --cash-bg:#D2E7D3;   --cash-ln:#c2ecd1;
+    --retire:#4A90A4; --retire-bg:#D8E6EA; --retire-ln:#b6e9e3;
     --hsa:#e0692f; --hsa-bg:#fcece2; --hsa-ln:#f7d2bd;
     --prop:#db2777;   --prop-bg:#fce7f1;   --prop-ln:#f8cbdf;
   }
@@ -48,7 +48,7 @@
   .allocbar span{display:block;height:100%;}
   .classlist{display:flex;flex-direction:column;gap:11px;margin-bottom:18px;}
   .ccard{display:flex;align-items:center;gap:12px;border-radius:var(--radius);
-    padding:15px 16px;cursor:pointer;transition:filter .12s,transform .1s;border:1px solid;}
+    padding:15px 16px;cursor:pointer;transition:filter .12s,transform .1s;}
   .ccard:active{filter:brightness(.97);transform:scale(.995);}
   .ccard .cbar{width:4px;align-self:stretch;border-radius:3px;flex:none;}
   .ccard .mid{flex:1;}
@@ -68,7 +68,7 @@
   .gauge .mark{position:absolute;top:0;transform:translateX(-50%);font-size:10px;color:var(--ink-faint);font-variant-numeric:tabular-nums;}
   .gauge .mark::before{content:"";position:absolute;top:-8px;left:50%;width:1px;height:5px;background:#c8cdd6;}
   .gauge .note{margin-top:12px;font-size:12px;color:var(--ink-2);line-height:1.5;}
-  .dhero{border-radius:var(--radius);padding:18px;margin-bottom:16px;border:1px solid;}
+  .dhero{border-radius:var(--radius);padding:18px;margin-bottom:16px;}
   .dhero.dark{background:var(--card);border-width:1px 1px 1px 4px;}
   .dhero.dark .v{color:var(--ink-2);}
   .dhero.dark .v .cur{color:var(--ink-faint);}
@@ -136,25 +136,27 @@
   .cashrow{display:flex;gap:10px;align-items:stretch;margin-bottom:18px;}
   .cashrow .ccard{flex:1;margin-bottom:0;}
   .xfer-btn{flex:none;width:66px;border-radius:var(--radius);border:none;cursor:pointer;
-    background:linear-gradient(135deg,#1a9d4a,#0d7a37);color:#fff;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:3px;font-weight:600;box-shadow:0 2px 8px rgba(26,157,74,.3);
+    background:#B6A9C8;color:var(--ink);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:3px;font-weight:600;box-shadow:0 2px 8px rgba(182,169,200,.35);
     transition:transform .1s;}
   .xfer-btn:active{transform:scale(.96);}
-  .xfer-btn .ic{font-size:18px;line-height:1;}
-  .xfer-btn .tx{font-size:12px;}
+  .xfer-btn .ic{font-size:15px;line-height:1;color:#EFE4D4;}
+  .xfer-btn .tx{font-size:15px;color:#EFE4D4;}
 
   /* 现金 收入/支出 tab */
   .cashtabs{display:flex;gap:8px;margin:16px 2px 12px;}
   .cashtab{flex:1;text-align:center;padding:11px;border-radius:12px;font-size:14px;font-weight:600;
-    cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink-2);transition:all .15s;}
-  .cashtab.on-in{background:var(--cash-bg);border-color:var(--cash-ln);color:var(--cash);}
-  .cashtab.on-ex{background:#fdecec;border-color:#f5c9c9;color:var(--neg);}
+    cursor:pointer;border:none;background:var(--card);color:var(--ink-2);transition:all .15s;}
+  .cashtab.on-in{background:#EBEDE8;border:none;color:#4F5D7A;}
+  .cashtab.on-ex{background:#F8CCD8;border:none;color:#B86A78;}
   /* 支出方块网格 */
   .expgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:4px;}
-  .expcell{border:1px solid rgba(0,0,0,.06);border-radius:14px;padding:11px 10px;}
+  .expcell{border:none;border-radius:14px;padding:11px 10px;}
   .expcell .nm{font-size:12px;font-weight:600;color:var(--ink);line-height:1.25;min-height:30px;}
   .expcell .amt{font-size:17px;font-weight:650;color:var(--ink);margin-top:4px;font-variant-numeric:tabular-nums;}
   .expcell .pc{font-size:10px;color:var(--ink-faint);margin-top:2px;font-variant-numeric:tabular-nums;}
+  .expcell.exptotal{grid-column:span 2;background:#fbf1d9;border:none;display:flex;flex-direction:column;justify-content:center;}
+  .expcell.exptotal .amt{font-size:20px;}
 
   /* 国债利息弹窗 */
   .imodal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:999;display:flex;align-items:center;justify-content:center;padding:24px;}
@@ -398,6 +400,7 @@ const GROUP_META = STOCK_TAXONOMY.map(function(t){ return {cat:t.cat, sub:t.sub,
 loadStock();
 
 // ==================== 从 Google Sheet 读取股票 ====================
+let monthExpense = {};   // 当月各类别支出（从 Sheet 的 Ledger 读取）
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
 
 // Sheet 的 category -> 小程序分组的映射
@@ -417,10 +420,14 @@ function syncStockFromSheet(){
     .then(function(r){ return r.json(); })
     .then(function(data){
       if(!data || data.status!=='success' || !data.stock) return;
+      if(data.expense) monthExpense = data.expense;
       rebuildStockGroups(data.stock);
       persistStock();
       // 重新计算并刷新界面
       recomputeAll();
+      if(typeof renderCashTabBody==='function' && document.getElementById('cashTabBody')){
+        renderCashTabBody();
+      }
     })
     .catch(function(e){ console.log('sheet sync failed', e); });
 }
@@ -439,8 +446,8 @@ function rebuildStockGroups(rows){
     // 现金：作为 noprice 放进"黄金·加密·现金"组
     if(sym.toLowerCase()==='cash' || sym==='\u73b0\u91d1'){
       const g = groupByCat['\u9ec4\u91d1 \u00b7 \u52a0\u5bc6 \u00b7 \u73b0\u91d1'];
-      // 方案A：以 Sheet 的 C 列(shares)为准；Sheet 为空时用本地值
-      const sheetCash = parseFloat(row.shares);
+      // 方案A：以 Sheet 的 E 列(price)为准；Sheet 为空时用本地值
+      const sheetCash = parseFloat(row.price);
       const cashVal = isFinite(sheetCash) ? sheetCash : loadBrokerCash();
       saveBrokerCash(cashVal);   // 同步到本地
       g.holdings.push({sym:'\u73b0\u91d1', noprice:true, mv:Math.round(cashVal), desc:'\u5238\u5546\u53ef\u7528\u00b7\u53ef\u70b9\u51fb\u7f16\u8f91'});
@@ -689,12 +696,11 @@ ORDER.forEach(k=>{
   s.style.width=(classTotal[k]/grand*100)+'%'; s.style.background=DATA[k].color; bar.appendChild(s);
 });
 // 卡片：先列计入总额的类，再列税优类（不计比例）
-function buildCard(k, counted){
+function buildCard(k, counted, isLast){
   const c=DATA[k], t=classTotal[k];
   const card=document.createElement('div');
   card.className='ccard';
   card.style.background='var(--'+k+'-bg)';
-  card.style.borderColor='var(--'+k+'-ln)';
   card.onclick=()=>openDetail(k);
   const right = counted
     ? '<div class="mv">$'+fmt(t)+'</div><div class="pc">'+(t/grand*100).toFixed(1)+'%</div>'
@@ -703,8 +709,8 @@ function buildCard(k, counted){
     '<div class="mid"><div class="nm">'+c.name+'</div>'+(c.meta?'<div class="meta">'+c.meta+'</div>':'')+'</div>'+
     '<div class="amt">'+right+'</div>'+
     '<span class="chev" style="color:'+c.color+'">&rsaquo;</span>';
-  if(k==='cash'){
-    // 现金卡右侧并排一个"转账"按钮
+  if(isLast){
+    // "转账"按钮固定跟随排序后的最后一张卡片
     const rowWrap=document.createElement('div');
     rowWrap.className='cashrow';
     rowWrap.appendChild(card);
@@ -718,7 +724,8 @@ function buildCard(k, counted){
     list.appendChild(card);
   }
 }
-ORDER.forEach(k=>buildCard(k,true));
+const sortedOrder = ORDER.slice().sort(function(a,b){ return classTotal[b]-classTotal[a]; });
+sortedOrder.forEach(function(k,idx){ buildCard(k,true, idx===sortedOrder.length-1); });
 // 分隔小标题
 const sep=document.createElement('div');
 sep.style.cssText='font-size:11px;color:var(--ink-faint);margin:8px 2px 2px;letter-spacing:.04em;';
@@ -756,7 +763,7 @@ function openDetail(k){
   document.getElementById('d-title').textContent=c.name;
   document.getElementById('d-back').style.color=c.color;
   const body=document.getElementById('d-body');
-  let html='<div class="dhero" style="background:var(--'+k+'-bg);border-color:var(--'+k+'-ln)">'+
+  let html='<div class="dhero" style="background:var(--'+k+'-bg)">'+
     '<div class="l" style="color:'+c.color+'">'+c.meta+'</div>'+
     '<div class="v num"><span class="cur">$</span>'+fmt(t)+'</div>'+
     '<div class="s">'+(ORDER.includes(k)?('\u5360\u6295\u8d44\u603b\u989d '+(t/grand*100).toFixed(1)+'%'):'\u7a0e\u4f18\u8d26\u6237 \u00b7 \u4e0d\u8ba1\u5165\u6295\u8d44\u603b\u989d')+'</div></div>';
@@ -1351,11 +1358,10 @@ function deleteStock(gi,hi){
 // ==================== 现金 / HSA 简单编辑 ====================
 const SIMPLE_KEY={cash:'cashList_v1', hsa:'hsaList_v1'};
 let editingSimple={cls:null, idx:-1};
+// HSA "\u6dfb\u52a0\u8d26\u6237" \u5df2\u5220\u9664\uff08\u4e0d\u9700\u8981\uff09\uff0c\u4fdd\u7559\u7a7a\u5b9e\u73b0\u4ee5\u517c\u5bb9\u8c03\u7528\u5904
 function renderSimpleAdd(cls){
   const wrap=document.getElementById('simpleAddWrap');
-  if(!wrap) return;
-  wrap.innerHTML='<div class="addbox" style="border-color:var(--'+cls+'-ln);background:var(--'+cls+'-bg)" onclick="showSimpleForm(\''+cls+'\')">'+
-    '<div class="plus" style="color:var(--'+cls+')">+</div><div class="lbl">\u6dfb\u52a0\u8d26\u6237</div></div>';
+  if(wrap) wrap.innerHTML='';
 }
 function simpleFormHtml(cls,vals){
   vals=vals||{};
@@ -1582,28 +1588,34 @@ function renderCashTabBody(){
     const cfg=loadIncome(); const p=cfg.payroll;
     const payrollLine = p&&p.amount ? ('\u5df2\u8bbe\uff1a\u6bcf\u4e24\u5468 $'+fmt(p.amount)) : '\u672a\u8bbe\u7f6e';
     body.innerHTML=
-      '<div class="group" style="background:var(--cash-bg);border-color:var(--cash-ln)">'+
-        '<div class="row" style="border-color:var(--cash-ln);cursor:pointer" onclick="showPayrollForm()">'+
-          '<div class="tk" style="width:auto;flex:1"><div class="sym">Payroll</div>'+
-            '<div class="qty">'+payrollLine+'</div></div>'+
-          '<div class="val"><div class="pc" style="color:var(--cash)">\u8bbe\u7f6e</div></div></div>'+
-        '<div class="row" style="border-color:var(--cash-ln);cursor:pointer" onclick="showBonusForm()">'+
-          '<div class="tk" style="width:auto;flex:1"><div class="sym">Bonus</div>'+
-            '<div class="qty">\u4e00\u6b21\u6027\u624b\u52a8</div></div>'+
-          '<div class="val"><div class="pc" style="color:var(--cash)">+ \u6dfb\u52a0</div></div></div>'+
+      '<div class="group" style="background:#ECEEE1;border:none">'+
+        '<div class="row" style="border-color:rgba(0,0,0,.05);cursor:pointer" onclick="showPayrollForm()">'+
+          '<div class="tk" style="width:auto;flex:1"><div class="sym" style="color:#4F5D7A">Payroll</div>'+
+            '<div class="qty" style="color:#4F5D7A">'+payrollLine+'</div></div>'+
+          '<div class="val"><div class="pc" style="color:#4F5D7A">\u8bbe\u7f6e</div></div></div>'+
+        '<div class="row" style="border-color:rgba(0,0,0,.05);cursor:pointer" onclick="showBonusForm()">'+
+          '<div class="tk" style="width:auto;flex:1"><div class="sym" style="color:#4F5D7A">Bonus</div>'+
+            '<div class="qty" style="color:#4F5D7A">\u4e00\u6b21\u6027\u624b\u52a8</div></div>'+
+          '<div class="val"><div class="pc" style="color:#4F5D7A">+ \u6dfb\u52a0</div></div></div>'+
       '</div>'+
-      '<div id="incomeFormWrap"></div>';
+      '<div id="incomeFormWrap"></div>'+
+      '<button style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:14px;background:var(--card);color:var(--ink-2);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="showChaseCashForm()">\u624b\u52a8\u4fee\u6539\u73b0\u91d1\u4f59\u989d</button>';
   }else{
     // 支出方块网格
     const expCats=['Bill & utilities','Shopping','Travel','Grocery','Dining','Auto & Gas','Entertainment','Health & Beauty','Home','Other'];
     const expColors={
       'Bill & utilities':'#e8f0fe','Shopping':'#f3e9fd','Travel':'#e3f6ea',
-      'Grocery':'#fbf1d9','Dining':'#fce7f1','Auto & Gas':'#e6f4f1',
-      'Entertainment':'#fdecec','Health & Beauty':'#e9f7f0','Home':'#fef3e2','Other':'#eef0f3'
+      'Grocery':'#fbf1d9','Dining':'#fce7f1','Auto & Gas':'#EFEDDA',
+      'Entertainment':'#fdecec','Health & Beauty':'#FFF8F2','Home':'#E6DDF6','Other':'#DCDDE3'
     };
-    // TODO: 之后从 Sheet 的 Ledger 读取真实金额；现在都为0
-    const amounts={}; expCats.forEach(c=>amounts[c]=0);
-    const total=expCats.reduce((s,c)=>s+amounts[c],0);
+    // 从 Sheet 的 Ledger 读到的当月支出；类别匹配忽略大小写和空格
+    const amounts={}; expCats.forEach(function(c){ amounts[c]=0; });
+    Object.keys(monthExpense||{}).forEach(function(k){
+      const key=k.trim().toLowerCase();
+      const hit=expCats.find(function(c){ return c.toLowerCase()===key; });
+      amounts[hit||'Other'] += (parseFloat(monthExpense[k])||0);
+    });
+    const total=expCats.reduce(function(s,c){ return s+amounts[c]; },0);
     body.innerHTML=
       '<div class="expgrid">'+
         expCats.map(function(c){
@@ -1612,8 +1624,10 @@ function renderCashTabBody(){
             '<div class="amt">$'+fmt(a)+'</div>'+
             '<div class="pc">\u5360\u6bd4 '+pc+'%</div></div>';
         }).join('')+
-      '</div>'+
-      '<div class="placeholder" style="margin-top:12px;font-size:12px">\u652f\u51fa\u6570\u636e\u5c06\u4ece Google Sheet \u8bb0\u8d26\u8868\u8bfb\u53d6\uff08\u5f85\u8fde\u63a5\uff09</div>';
+        '<div class="expcell exptotal"><div class="nm">\u672c\u6708\u5408\u8ba1</div>'+
+          '<div class="amt">$'+fmt(total)+'</div>'+
+          '<div class="pc">'+expCats.length+' \u7c7b\u5408\u8ba1</div></div>'+
+      '</div>';
   }
 }
 function showPayrollForm(){
@@ -1744,6 +1758,31 @@ function submitBuyStock(){
                  shares:Number(sh.toFixed(4)), cost:Number(cost.toFixed(4))});
   }
   syncCashToSheet();
+}
+
+
+function showChaseCashForm(){
+  const item=DATA.cash.groups[0].holdings[0];
+  const cur=item?item.mv:0;
+  const wrap=document.getElementById('incomeFormWrap');
+  wrap.innerHTML=
+    '<div class="editform" style="border-color:var(--cash-ln)">'+
+      '<div class="fld"><label>Chase \u73b0\u91d1\u4f59\u989d ($)</label>'+
+        '<input id="chase-amt" type="number" inputmode="decimal" value="'+cur+'" placeholder="\u4f8b\uff1a10000"></div>'+
+      '<div class="btns">'+
+        '<button class="cancel" onclick="document.getElementById(\'incomeFormWrap\').innerHTML=\'\'">\u53d6\u6d88</button>'+
+        '<button class="save" style="background:var(--cash)" onclick="saveChaseCash()">\u4fdd\u5b58</button>'+
+      '</div></div>';
+  document.getElementById('chase-amt').focus();
+}
+function saveChaseCash(){
+  const n=parseFloat(document.getElementById('chase-amt').value);
+  if(!(n>=0)){ alert('\u8bf7\u8f93\u5165\u6709\u6548\u91d1\u989d'); return; }
+  const item=DATA.cash.groups[0].holdings[0];
+  if(item){ item.mv=Math.round(n); }
+  persistSimple('cash','cashList_v1');
+  recompute();
+  openDetail('cash');
 }
 
 function go(id){
