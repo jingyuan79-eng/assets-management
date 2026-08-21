@@ -401,6 +401,26 @@ loadStock();
 
 // ==================== 从 Google Sheet 读取股票 ====================
 let monthExpense = {};   // 当月各类别支出（从 Sheet 的 Ledger 读取）
+// 支出自动扣现金：按"年月"记录已扣过的总额，只扣新增的差额，跨月自动重置
+function loadExpenseDeductState(){
+  try{ return JSON.parse(localStorage.getItem('expenseDeducted_v1')||'{"ym":"","total":0}'); }
+  catch(e){ return {ym:"",total:0}; }
+}
+function saveExpenseDeductState(st){ localStorage.setItem('expenseDeducted_v1', JSON.stringify(st)); }
+function deductExpenseFromCash(expenseMap){
+  const d=new Date();
+  const ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  const newTotal=Object.values(expenseMap||{}).reduce(function(s,v){ return s+(parseFloat(v)||0); },0);
+  let st=loadExpenseDeductState();
+  if(st.ym!==ym){ st={ym:ym, total:0}; }   // 新的一个月，已扣记录清零重新累计
+  const delta=newTotal-st.total;
+  if(delta>0.001){
+    const c=DATA.cash.groups[0].holdings.find(function(x){return x.sym==='Chase';});
+    if(c){ c.mv=Math.round((c.mv||0)-delta); persistSimple('cash','cashList_v1'); }
+  }
+  st.total=newTotal;
+  saveExpenseDeductState(st);
+}
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
 
 // Sheet 的 category -> 小程序分组的映射
@@ -420,7 +440,7 @@ function syncStockFromSheet(){
     .then(function(r){ return r.json(); })
     .then(function(data){
       if(!data || data.status!=='success' || !data.stock) return;
-      if(data.expense) monthExpense = data.expense;
+      if(data.expense){ monthExpense = data.expense; deductExpenseFromCash(monthExpense); }
       rebuildStockGroups(data.stock);
       persistStock();
       // 重新计算并刷新界面
@@ -515,22 +535,29 @@ function addToChase(amt){
   const c=DATA.cash.groups[0].holdings.find(x=>x.sym==='Chase');
   if(c){ c.mv=Math.round((c.mv||0)+amt); persistSimple('cash','cashList_v1'); }
 }
-// 打开时结算 payroll：从 lastPayDate 起，每过14天补发一笔
+// 打开时结算 payroll：按设定频率（weekly/biweekly/monthly）从 lastPayDate 起补发
+function nextPayDate(d, freq){
+  const n=new Date(d);
+  if(freq==='weekly'){ n.setDate(n.getDate()+7); }
+  else if(freq==='monthly'){ n.setMonth(n.getMonth()+1); }
+  else{ n.setDate(n.getDate()+14); }   // biweekly（默认）
+  return n;
+}
 function runPayroll(){
   const cfg=loadIncome();
   if(!cfg.payroll || !cfg.payroll.amount || !cfg.payroll.start) return;
   const amt=cfg.payroll.amount;
+  const freq=cfg.payroll.freq||'biweekly';
   let last=cfg.lastPayDate? new Date(cfg.lastPayDate+'T00:00:00') : new Date(cfg.payroll.start+'T00:00:00');
   const today=new Date(); today.setHours(0,0,0,0);
-  // 若首次（lastPayDate为空），从start当天开始算，start当天也算一次
   let paid=false;
   if(!cfg.lastPayDate){
     // 发放起始日当天先发一次
     if(new Date(cfg.payroll.start+'T00:00:00')<=today){ addToChase(amt); last=new Date(cfg.payroll.start+'T00:00:00'); paid=true; }
   }
-  // 之后每14天补一次
+  // 之后按频率补发
   while(true){
-    const next=new Date(last); next.setDate(next.getDate()+14);
+    const next=nextPayDate(last, freq);
     if(next<=today){ addToChase(amt); last=next; paid=true; } else break;
   }
   if(paid){ cfg.lastPayDate=last.toISOString().slice(0,10); saveIncome(cfg); }
@@ -1590,7 +1617,8 @@ function renderCashTabBody(){
   if(!body) return;
   if(cashTab==='in'){
     const cfg=loadIncome(); const p=cfg.payroll;
-    const payrollLine = p&&p.amount ? ('\u5df2\u8bbe\uff1a\u6bcf\u4e24\u5468 $'+fmt(p.amount)) : '\u672a\u8bbe\u7f6e';
+    const freqLabel={weekly:'\u6bcf\u5468',biweekly:'\u6bcf\u4e24\u5468',monthly:'\u6bcf\u6708'};
+    const payrollLine = p&&p.amount ? ('\u5df2\u8bbe\uff1a'+(freqLabel[p.freq]||'\u6bcf\u4e24\u5468')+' $'+fmt(p.amount)) : '\u672a\u8bbe\u7f6e';
     body.innerHTML=
       '<div class="group" style="background:#ECEEE1;border:none">'+
         '<div class="row" style="border-color:rgba(0,0,0,.05);cursor:pointer" onclick="showPayrollForm()">'+
@@ -1636,14 +1664,21 @@ function renderCashTabBody(){
 }
 function showPayrollForm(){
   const cfg=loadIncome(); const p=cfg.payroll||{};
+  const freq=p.freq||'biweekly';
+  const selStyle='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  function fOpt(v,label){ return '<option value="'+v+'"'+(freq===v?' selected':'')+'>'+label+'</option>'; }
   const wrap=document.getElementById('incomeFormWrap');
   wrap.innerHTML=
     '<div class="editform" style="border-color:var(--cash-ln)">'+
       '<div class="fld"><label>\u6bcf\u671f\u91d1\u989d ($) \u00b7 \u7a0e\u540e\u5b9e\u53d1</label>'+
         '<input id="pay-amt" type="number" inputmode="decimal" value="'+(p.amount||'')+'" placeholder="\u4f8b\uff1a2500"></div>'+
+      '<div class="fld"><label>\u53d1\u85aa\u9891\u7387</label>'+
+        '<select id="pay-freq" style="'+selStyle+'">'+
+          fOpt('weekly','\u6bcf\u5468')+fOpt('biweekly','\u6bcf\u4e24\u5468')+fOpt('monthly','\u6bcf\u6708')+
+        '</select></div>'+
       '<div class="fld"><label>\u4e0b\u4e00\u6b21/\u8d77\u59cb\u53d1\u85aa\u65e5</label>'+
         '<input id="pay-start" type="date" value="'+(p.start||'')+'"></div>'+
-      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:10px">\u8bbe\u7f6e\u540e\u6bcf\u4e24\u5468\u81ea\u52a8\u5165\u8d26 Chase</div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:10px">\u8bbe\u7f6e\u540e\u6309\u9891\u7387\u81ea\u52a8\u5165\u8d26 Chase</div>'+
       '<div class="btns">'+
         '<button class="cancel" onclick="document.getElementById(\'incomeFormWrap\').innerHTML=\'\'">\u53d6\u6d88</button>'+
         '<button class="save" style="background:var(--cash)" onclick="savePayroll()">\u4fdd\u5b58</button>'+
@@ -1653,9 +1688,10 @@ function showPayrollForm(){
 function savePayroll(){
   const amt=parseFloat(document.getElementById('pay-amt').value);
   const start=document.getElementById('pay-start').value;
+  const freq=document.getElementById('pay-freq').value;
   if(!(amt>0)||!start){ alert('\u8bf7\u586b\u5199\u91d1\u989d\u548c\u65e5\u671f'); return; }
   const cfg=loadIncome();
-  cfg.payroll={amount:Math.round(amt), start:start};
+  cfg.payroll={amount:Math.round(amt), start:start, freq:freq};
   cfg.lastPayDate=null; // 重新从start结算
   saveIncome(cfg);
   runPayroll();
