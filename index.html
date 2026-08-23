@@ -11,9 +11,8 @@
     --bg:#f2f3f5; --card:#ffffff; --ink:#2e333d; --ink-2:#5d6675; --ink-faint:#9aa1b0;
     --line:#e2e5ea; --pos:#1a7f37; --neg:#c9314a; --radius:16px;
 
-    /* 每大类：主色(icon/强调) + 浅底 + 边框。文字统一深色 */
-    --stock:#2f6fed;  --stock-bg:#e8f0fe;  --stock-ln:#c7dbfb;  --stock-head:#f0f5ff;  /* 更浅的蓝·标题 */
-    --grphead-bg:#f0f1f3;  /* 浅灰色·大类标题底 */
+    --stock:#2f6fed;  --stock-bg:#e8f0fe;  --stock-ln:#c7dbfb;  --stock-head:#f0f5ff;
+    --grphead-bg:#f0f1f3;
     --cd:#9333ea;     --cd-bg:#f3e9fd;     --cd-ln:#e3cdfa;
     --bond:#c2820a;   --bond-bg:#fbf1d9;   --bond-ln:#f2e0af;
     --cash:#7C9070;   --cash-bg:#D2E7D3;   --cash-ln:#c2ecd1;
@@ -38,7 +37,8 @@
   .nav .title{font-size:15px;font-weight:600;flex:1;}
   header{display:flex;justify-content:space-between;align-items:baseline;margin:8px 2px 20px;}
   header h1{font-size:15px;font-weight:600;letter-spacing:.01em;}
-  header .date{font-size:12px;color:var(--ink-faint);font-variant-numeric:tabular-nums;}
+  header .date{font-size:12px;color:var(--ink-faint);font-variant-numeric:tabular-nums;
+    background:none;border:none;font-family:inherit;cursor:pointer;padding:4px 0 4px 8px;}
   .hero{margin:0 2px 22px;}
   .hero .label{font-size:12px;color:var(--ink-2);letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px;font-weight:500;}
   .hero .value{font-size:40px;font-weight:600;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums;color:var(--ink-2);}
@@ -69,7 +69,7 @@
   .gauge .mark::before{content:"";position:absolute;top:-8px;left:50%;width:1px;height:5px;background:#c8cdd6;}
   .gauge .note{margin-top:12px;font-size:12px;color:var(--ink-2);line-height:1.5;}
   .dhero{border-radius:var(--radius);padding:18px;margin-bottom:16px;}
-  .dhero.dark{background:var(--card);border-width:1px 1px 1px 4px;}
+  .dhero.dark{background:var(--card);border-width:1px 1px 1px 4px;border-style:solid;}
   .dhero.dark .v{color:var(--ink-2);}
   .dhero.dark .v .cur{color:var(--ink-faint);}
   .dhero.dark .s{color:var(--ink-2);}
@@ -93,9 +93,7 @@
   .row .val .pc{font-size:11px;color:var(--ink-faint);margin-top:1px;font-variant-numeric:tabular-nums;font-weight:400;}
   .placeholder{background:var(--card);border:1px dashed var(--line);border-radius:var(--radius);
     padding:20px;text-align:center;color:var(--ink-2);font-size:13px;line-height:1.6;margin-top:8px;}
-  .placeholder b{color:var(--ink);font-weight:600;}
 
-  /* add / edit form */
   .addbox{border:1px dashed var(--cd-ln);background:var(--cd-bg);border-radius:var(--radius);
     padding:16px;text-align:center;cursor:pointer;transition:filter .12s;margin-top:4px;}
   .addbox:active{filter:brightness(.97);}
@@ -106,7 +104,7 @@
   .editform .fld{margin-bottom:12px;}
   .editform label{display:block;font-size:12px;color:var(--ink-2);margin-bottom:5px;font-weight:500;}
   .editform input{width:100%;border:1px solid var(--line);border-radius:10px;background:#fafbfc;
-    padding:11px 12px;font-size:15px;color:var(--ink);font-family:inherit;
+    padding:11px 12px;font-size:16px;color:var(--ink);font-family:inherit;
     font-variant-numeric:tabular-nums;-webkit-appearance:none;}
   .editform input:focus{outline:none;border-color:var(--cd);background:#fff;}
   .editform .btns{display:flex;gap:10px;margin-top:6px;}
@@ -114,17 +112,9 @@
     font-weight:600;font-family:inherit;cursor:pointer;}
   .editform .save{background:var(--cd);color:#fff !important;border-radius:12px;}
   .editform .cancel{background:#eceef2;color:var(--ink-2);}
+  .editform .danger{background:#fdecec;color:var(--neg);border:1px solid #f6c9d0;}
+  .delrow{margin-top:10px;padding-top:12px;border-top:1px dashed var(--line);}
 
-  /* swipe-to-delete row */
-  .swipe{position:relative;overflow:hidden;}
-  .swipe-del{position:absolute;top:0;right:0;height:100%;width:76px;background:var(--neg);
-    color:#fff;font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:center;
-    cursor:pointer;z-index:0;}
-  .swipe-row{position:relative;z-index:1;background:var(--cd-bg);transition:transform .18s ease;
-    will-change:transform;}
-  .swipe.open .swipe-row{transform:translateX(-76px);}
-
-  /* 股票成本/利润列 */
   .row .scost{flex:none;width:88px;text-align:right;padding-right:0;margin-left:auto;}
   .row .scost .ac{font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;font-weight:500;}
   .row .scost .pr{font-size:11px;margin-top:1px;font-variant-numeric:tabular-nums;font-weight:600;}
@@ -132,7 +122,6 @@
   .stock-slot:empty{display:none;}
   .stock-slot .editform{margin:2px 0 10px;}
 
-  /* 转账按钮 */
   .cashrow{display:flex;gap:10px;align-items:stretch;margin-bottom:18px;}
   .cashrow .ccard{flex:1;margin-bottom:0;}
   .xfer-btn{flex:none;width:66px;border-radius:var(--radius);border:none;cursor:pointer;
@@ -143,22 +132,18 @@
   .xfer-btn .ic{font-size:15px;line-height:1;color:#EFE4D4;}
   .xfer-btn .tx{font-size:15px;color:#EFE4D4;}
 
-  /* 现金 收入/支出 tab */
   .cashtabs{display:flex;gap:8px;margin:16px 2px 12px;}
   .cashtab{flex:1;text-align:center;padding:11px;border-radius:12px;font-size:14px;font-weight:600;
     cursor:pointer;border:none;background:var(--card);color:var(--ink-2);transition:all .15s;}
   .cashtab.on-in{background:#EBEDE8;border:none;color:#4F5D7A;}
   .cashtab.on-ex{background:#F8CCD8;border:none;color:#B86A78;}
-  /* 支出方块网格 */
   .expgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:4px;}
   .expcell{border:none;border-radius:14px;padding:11px 10px;}
   .expcell .nm{font-size:12px;font-weight:600;color:var(--ink);line-height:1.25;min-height:30px;}
   .expcell .amt{font-size:17px;font-weight:650;color:var(--ink);margin-top:4px;font-variant-numeric:tabular-nums;}
   .expcell .pc{font-size:10px;color:var(--ink-faint);margin-top:2px;font-variant-numeric:tabular-nums;}
-  .expcell.exptotal{grid-column:span 2;background:#fbf1d9;border:none;display:flex;flex-direction:column;justify-content:center;}
-  .expcell.exptotal .amt{font-size:20px;}
+  .expcell.exptotal{background:#F8CCD8;border:1.5px solid #B86A78;}
 
-  /* 国债利息弹窗 */
   .imodal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:999;display:flex;align-items:center;justify-content:center;padding:24px;}
   .imodal{background:var(--card);border-radius:20px;padding:22px 20px;max-width:340px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.2);}
   .imodal h3{margin:0 0 6px;font-size:17px;color:var(--ink);}
@@ -168,7 +153,6 @@
   .imodal .choice button{flex:1;padding:13px;border:none;border-radius:12px;font-size:15px;font-weight:600;
     font-family:inherit;cursor:pointer;color:#fff;}
 
-  /* ===== 详情页大类卡片（干净版，仿主页风格）===== */
   .stkgroup{border:1px solid var(--stock-ln);border-radius:var(--radius);overflow:hidden;margin-bottom:14px;}
   .stkgroup-head{display:flex;align-items:center;gap:10px;padding:12px 14px;}
   .stkbar{width:4px;align-self:stretch;border-radius:3px;flex:none;min-height:20px;}
@@ -176,10 +160,10 @@
   .stkcat .stksub{display:block;font-size:11px;color:var(--ink-faint);font-weight:400;margin-top:2px;}
   .stkpc{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;}
   .stkrows .row{background:#F8FAFC;border-top:1px solid rgba(0,0,0,.05);padding:9px 14px;}
-  .stkrows .swipe-row{background:transparent;}
   .foot{text-align:center;font-size:11px;color:var(--ink-faint);margin-top:24px;line-height:1.6;}
   .foot .badge{display:inline-block;background:#e6e9ee;border:1px solid var(--line);border-radius:6px;
     padding:3px 8px;color:var(--ink-2);margin-bottom:8px;font-variant-numeric:tabular-nums;font-weight:400;}
+  .foot .badge.err{background:#fdecec;border-color:#f6c9d0;color:#B86A78;}
 </style>
 </head>
 <body>
@@ -188,7 +172,7 @@
 <div class="screen active" id="scr-overview">
   <header>
     <h1>资产驾驶舱</h1>
-    <span class="date num" id="asof">—</span>
+    <button class="date num" id="asof" onclick="syncStockFromSheet()">—</button>
   </header>
   <div class="hero">
     <div class="label">投资资产总额 · 不含房产、退休金</div>
@@ -212,8 +196,8 @@
     <div class="note" id="semiNote"></div>
   </div>
   <div class="foot">
-    <div class="badge">初始版本 · 数据写死于 2026-07-31</div><br>
-    点击任意大类查看明细 · 下一步接 Google Sheet
+    <div class="badge" id="syncBadge">同步中…</div><br>
+    点击任意大类查看明细 · 点右上角日期可手动重新同步
   </div>
 </div>
 
@@ -242,166 +226,332 @@
 </div>
 
 <script>
+/* ============================================================
+   资产驾驶舱  ·  v2 (2026-08-22)
+   本轮修复：
+   1. 转账到券商现金会写回 Sheet（原来会被下次同步覆盖 → 丢钱）
+   2. 定期转账/工资结算改为「Sheet 同步成功后」才执行
+   3. ASMI 全面统一为 ASMIY
+   4. 同步完成后整页重绘（含卡片排序、集中度说明文字）
+   5. CD / 国债 / HSA / 股票 全部可删除
+   6. 券商现金编辑改内联表单（去掉 prompt）
+   7. 写 Sheet 改串行队列，避免并发导致行号错乱
+   8. 支出金额被改小时会把钱加回 Chase
+   ============================================================ */
+
 const ASOF = new Date().toISOString().slice(0,10);
+
+// ==================== 数据骨架 ====================
 const DATA = {
   stock: {
-    name:"\u80a1\u7968", color:"var(--stock)", key:"stock", meta:"Webull \u00b7 \u542b\u73b0\u91d1/BTC/RSU",
-    groups:[]  // 初始为空，启动时由 localStorage 或 Google Sheet 填充（见 syncStockFromSheet）
+    name:"股票", color:"var(--stock)", key:"stock", meta:"Webull · 含现金/BTC/RSU",
+    groups:[]   // 由 localStorage / Google Sheet 填充
   },
   cd: {
-    name:"\u50a8\u84c4", color:"var(--cd)", key:"cd", meta:"Marcus \u00b7 \u5b9a\u5b58+\u6d3b\u671f",
-    groups:[ { cat:"\u5b9a\u671f\u5b58\u5355", sub:"", holdings:[
+    name:"储蓄", color:"var(--cd)", key:"cd", meta:"Marcus · 定存+活期",
+    groups:[ { cat:"定期存单", sub:"", holdings:[
       {sym:"CD-7597", rate:4.0, mat:"2027-06-30", baseMv:21264, updated:"2026-07-31"},
       {sym:"CD-9185", rate:4.1, mat:"2027-02-05", baseMv:10239, updated:"2026-07-31"},
       {sym:"OS-9250", rate:3.4, mat:"", baseMv:41000, updated:"2026-08-01"},
     ]}]
   },
   bond: {
-    name:"\u56fd\u503a", color:"var(--bond)", key:"bond", meta:"TreasuryDirect \u00b7 \u5747 3.98%",
-    groups:[ { cat:"\u7f8e\u56fd\u56fd\u503a", sub:"", holdings:[
+    name:"国债", color:"var(--bond)", key:"bond", meta:"TreasuryDirect · 均 3.98%",
+    groups:[ { cat:"美国国债", sub:"", holdings:[
       {sym:"T-Notes", rate:3.75, mat:"2027-08-15", baseMv:10000, updated:"2026-07-31"},
       {sym:"I Bond",  rate:4.26, mat:"2056-01-01", baseMv:8000,  updated:"2026-07-31"},
     ]}]
   },
   cash: {
-    name:"\u73b0\u91d1", color:"var(--cash)", key:"cash", meta:"",
-    groups:[ { cat:"\u64cd\u4f5c\u8d26\u6237", sub:"", holdings:[
-      {sym:"Chase",  qty:"~0%",   desc:"\u65e5\u5e38\u64cd\u4f5c\u8d26\u6237", mv:10000},
+    name:"现金", color:"var(--cash)", key:"cash", meta:"",
+    groups:[ { cat:"操作账户", sub:"", holdings:[
+      {sym:"Chase", qty:"~0%", desc:"日常操作账户", mv:10000},
     ]}],
     ledger:true
   },
   retire: {
-    name:"\u9000\u4f11", color:"var(--retire)", key:"retire", meta:"\u7a0e\u4f18\u00b7\u957f\u671f",
-    groups:[ { cat:"\u7a0e\u4f18\u8d26\u6237", sub:"", holdings:[
-      {sym:"401k", desc:"\u81ea\u52a8\u589e\u957f", baseMv:102000, updated:"2026-08-01",
+    name:"退休", color:"var(--retire)", key:"retire", meta:"税优·长期",
+    groups:[ { cat:"税优账户", sub:"", holdings:[
+      {sym:"401k", desc:"自动增长", baseMv:102000, updated:"2026-08-01",
         empCon:905, erCon:271, rate:15, growth:true},
-      {sym:"Roth IRA", qty:"\u2014", desc:"QQQM\u00b7SMH\u00b7SPAXX", mv:7515},
+      {sym:"Roth IRA", qty:"—", desc:"QQQM·SMH·SPAXX", mv:7515},
     ]}]
   },
   hsa: {
-    name:"HSA", color:"var(--hsa)", key:"hsa", meta:"\u533b\u7597\u50a8\u84c4\u00b7\u53cc\u91cd\u514d\u7a0e",
-    groups:[ { cat:"HSA \u8d26\u6237", sub:"", holdings:[
-      {sym:"Investment", qty:"\u2014", desc:"\u57fa\u91d1\u6295\u8d44\u00b7\u957f\u671f\u514d\u7a0e", mv:3458},
-      {sym:"Cash",       qty:"\u2014", desc:"\u53ef\u62a5\u9500\u533b\u7597\u652f\u51fa", mv:2500},
+    name:"HSA", color:"var(--hsa)", key:"hsa", meta:"医疗储蓄·双重免税",
+    groups:[ { cat:"HSA 账户", sub:"", holdings:[
+      {sym:"Investment", qty:"—", desc:"基金投资·长期免税", mv:3458},
+      {sym:"Cash",       qty:"—", desc:"可报销医疗支出", mv:2500},
     ]}]
   },
 };
+
 const PROPERTY = {
-  value:415000,      // 房价估值
-  loan:263000,       // 当前贷款余额（起点）
-  origLoan:315000,   // 原始贷款额
-  rate:5.124,        // 年利率 %
-  termYears:30,      // 原始期限
-  payment:2025,      // 标准月供
-  extra:600,         // 每月额外还本金（可编辑）
-  updated:"2026-08-01" // 余额起点日期
+  value:415000, loan:263000, origLoan:315000, rate:5.124,
+  termYears:30, payment:2025, extra:600, updated:"2026-08-01"
 };
-// 从 localStorage 读取用户对 PROPERTY 的修改
 try{ const sp=JSON.parse(localStorage.getItem('property_v1')||'null'); if(sp) Object.assign(PROPERTY,sp); }catch(e){}
 function persistProp(){ localStorage.setItem('property_v1', JSON.stringify(PROPERTY)); }
 
-// 按经过月数摊销：每月 利息=余额×月利率，本金=(月供-利息)+额外，余额-=本金
-function amortizeNow(){
-  const monthlyRate = PROPERTY.rate/100/12;
-  const start = new Date(PROPERTY.updated+'T00:00:00');
-  const now = new Date();
-  let months = (now.getFullYear()-start.getFullYear())*12 + (now.getMonth()-start.getMonth());
-  months = Math.max(0, months);
-  let bal = PROPERTY.loan;
-  for(let m=0;m<months;m++){
-    const interest = bal*monthlyRate;
-    let principal = (PROPERTY.payment - interest) + PROPERTY.extra;
-    if(principal>bal) principal=bal;
-    bal -= principal;
-    if(bal<=0){ bal=0; break; }
-  }
-  return Math.round(bal);
-}
-// 预估：从当前余额起，按当前月供+额外，还需多少个月还清 & 总利息
-function payoffEstimate(){
-  const monthlyRate = PROPERTY.rate/100/12;
-  let bal = amortizeNow();
-  let months=0, totalInterest=0;
-  const pay = PROPERTY.payment + PROPERTY.extra;
-  while(bal>0 && months<600){
-    const interest = bal*monthlyRate;
-    let principal = pay - interest;
-    if(principal<=0){ months=-1; break; } // 月供不够付利息
-    if(principal>bal) principal=bal;
-    totalInterest += interest;
-    bal -= principal;
-    months++;
-  }
-  return {months, totalInterest:Math.round(totalInterest)};
-}
 const ORDER = ['stock','cd','bond','hsa','cash'];
 const ORDER_TAX = ['retire'];
 const ALL = ORDER.concat(ORDER_TAX);
 
+// ==================== 股票分类（唯一数据源）====================
+const STOCK_TAXONOMY = [
+  {sheet:'Semiconductor',     cat:'半导体 / AI 硬件', sub:'最大集中风险', semi:true},
+  {sheet:'IndexETF',          cat:'大盘指数 ETF',    sub:'标普500核心'},
+  {sheet:'Tech/AI',           cat:'其他科技个股',    sub:''},
+  {sheet:'Consumer',          cat:'消费',            sub:''},
+  {sheet:'医疗',              cat:'医疗 ETF',        sub:'防御·低AI相关'},
+  {sheet:'International ETF', cat:'国际股票 ETF',    sub:'非美分散'},
+  {sheet:'Value ETF',         cat:'价值 / 小盘价值', sub:'平衡成长倾斜'},
+  {sheet:'Other ETF',         cat:'主题 ETF',        sub:'国防/能源/太空'},
+  {sheet:'Gold.coin',         cat:'黄金 · 加密 · 现金', sub:'保险与待投资子弹'}
+];
+const CAT_MAP = {}; STOCK_TAXONOMY.forEach(function(t){ CAT_MAP[t.sheet]=t.cat; });
+const GROUP_META = STOCK_TAXONOMY.map(function(t){ return {cat:t.cat, sub:t.sub, semi:t.semi||false}; });
+const STOCK_CATS = GROUP_META.map(function(g){ return g.cat; });
+const GOLD_CAT = '黄金 · 加密 · 现金';
+const THEME_CAT = '主题 ETF';
 
-// ---- 本地存储：CD 列表统一管理（首次用 DATA 里的初始值播种） ----
+// ASMI 在 Sheet / GOOGLEFINANCE 中统一写作 ASMIY
+function normSym(s){
+  const v=(s||'').toString().trim().toUpperCase();
+  return v==='ASMI' ? 'ASMIY' : v;
+}
+
+const SYM_DESC = {
+  ASMIY:'雇主股·已归属',
+  TSM:'台积电·代工', NVDA:'英伟达·芯片', MU:'美光·存储', SOXX:'半导体 ETF', SMH:'半导体 ETF',
+  VOO:'Vanguard 标普500', SPY:'SPDR 标普500', GOOG:'Alphabet', COST:'Costco',
+  VHT:'Vanguard 医疗', VEA:'发达市场·除美', VXUS:'全球除美',
+  AVUV:'美国小盘价值', AVLV:'美国大盘价值',
+  PPA:'航空国防', GRID:'智能电网', NLR:'核能·铀', SPCX:'SpaceX·太空',
+  IAU:'黄金', BTCUSD:'比特币', BTC:'比特币'
+};
+
+// ==================== localStorage ====================
 function loadCd(){
   try{
     localStorage.removeItem('assetAdditions'); localStorage.removeItem('cdList');
     const raw = localStorage.getItem('cdList_v3');
-    if(raw){
-      DATA.cd.groups[0].holdings = JSON.parse(raw);
-    }else{
-      // 首次：把写死的初始 CD 存入 localStorage
-      localStorage.setItem('cdList_v3', JSON.stringify(DATA.cd.groups[0].holdings));
-    }
+    if(raw){ DATA.cd.groups[0].holdings = JSON.parse(raw); }
+    else{ localStorage.setItem('cdList_v3', JSON.stringify(DATA.cd.groups[0].holdings)); }
   }catch(e){ console.log('cd load err',e); }
 }
-function persistCd(){
-  localStorage.setItem('cdList_v3', JSON.stringify(DATA.cd.groups[0].holdings));
-}
-loadCd();
-// ---- 股票：本地存储（股数/成本/现价）----
+function persistCd(){ localStorage.setItem('cdList_v3', JSON.stringify(DATA.cd.groups[0].holdings)); }
+
 function emptyStockGroups(){
-  // 按分类建好空骨架，保证 groups 结构永远存在（防止启动时报错白屏）
-  return GROUP_META.map(function(m){
-    return {cat:m.cat, sub:m.sub, semi:m.semi||false, holdings:[]};
-  });
+  return GROUP_META.map(function(m){ return {cat:m.cat, sub:m.sub, semi:m.semi||false, holdings:[]}; });
 }
 function loadStock(){
   try{
     const raw=localStorage.getItem('stockGroups_v2');
     const saved=raw?JSON.parse(raw):null;
-    if(saved && saved.length){ DATA.stock.groups = saved; }
-    else{ DATA.stock.groups = emptyStockGroups(); }
-  }catch(e){
-    console.log('stock load',e);
-    DATA.stock.groups = emptyStockGroups();
-  }
+    DATA.stock.groups = (saved && saved.length) ? saved : emptyStockGroups();
+  }catch(e){ DATA.stock.groups = emptyStockGroups(); }
 }
 function persistStock(){ localStorage.setItem('stockGroups_v2', JSON.stringify(DATA.stock.groups)); }
-// 券商现金：独立存储（本地管理，买卖/转账自动增减）
+
 function loadBrokerCash(){
   const v=localStorage.getItem('brokerCash_v1');
-  return v!=null ? parseFloat(v) : 2316;   // 默认 2316
+  return v!=null ? parseFloat(v) : 0;
 }
 function saveBrokerCash(v){ localStorage.setItem('brokerCash_v1', String(Math.round(v))); }
-const STOCK_TAXONOMY = [
-  {sheet:'Semiconductor',      cat:'\u534a\u5bfc\u4f53 / AI \u786c\u4ef6', sub:'\u6700\u5927\u96c6\u4e2d\u98ce\u9669', semi:true},
-  {sheet:'IndexETF',           cat:'\u5927\u76d8\u6307\u6570 ETF', sub:'\u6807\u666e500\u6838\u5fc3'},
-  {sheet:'Tech/AI',            cat:'\u5176\u4ed6\u79d1\u6280\u4e2a\u80a1', sub:''},
-  {sheet:'Consumer',           cat:'\u6d88\u8d39', sub:''},
-  {sheet:'\u533b\u7597',           cat:'\u533b\u7597 ETF', sub:'\u9632\u5fa1\u00b7\u4f4eAI\u76f8\u5173'},
-  {sheet:'International ETF',   cat:'\u56fd\u9645\u80a1\u7968 ETF', sub:'\u975e\u7f8e\u5206\u6563'},
-  {sheet:'Value ETF',          cat:'\u4ef7\u503c / \u5c0f\u76d8\u4ef7\u503c', sub:'\u5e73\u8861\u6210\u957f\u503e\u659c'},
-  {sheet:'Other ETF',          cat:'\u4e3b\u9898 ETF', sub:'\u56fd\u9632/\u80fd\u6e90/\u592a\u7a7a'},
-  {sheet:'Gold.coin',          cat:'\u9ec4\u91d1 \u00b7 \u52a0\u5bc6 \u00b7 \u73b0\u91d1', sub:'\u4fdd\u9669\u4e0e\u5f85\u6295\u8d44\u5b50\u5f39'}
-];
-// 由 taxonomy 派生
-const CAT_MAP = {}; STOCK_TAXONOMY.forEach(function(t){ CAT_MAP[t.sheet]=t.cat; });
-const GROUP_META = STOCK_TAXONOMY.map(function(t){ return {cat:t.cat, sub:t.sub, semi:t.semi||false}; });
-// symbol -> 中文描述（保留小程序里的说明文字）
 
-loadStock();
+function loadSimple(cls, key){
+  try{
+    const raw=localStorage.getItem(key);
+    if(raw){ DATA[cls].groups[0].holdings = JSON.parse(raw); }
+    else{ localStorage.setItem(key, JSON.stringify(DATA[cls].groups[0].holdings)); }
+  }catch(e){}
+}
+function persistSimple(cls, key){ localStorage.setItem(key, JSON.stringify(DATA[cls].groups[0].holdings)); }
 
-// ==================== 从 Google Sheet 读取股票 ====================
-let monthExpense = {};   // 当月各类别支出（从 Sheet 的 Ledger 读取）
-// 支出自动扣现金：按"年月"记录已扣过的总额，只扣新增的差额，跨月自动重置
+function loadBond(){
+  try{
+    localStorage.removeItem('bondList');
+    const raw = localStorage.getItem('bondList_v2');
+    if(raw){ DATA.bond.groups[0].holdings = JSON.parse(raw); }
+    else{ localStorage.setItem('bondList_v2', JSON.stringify(DATA.bond.groups[0].holdings)); }
+  }catch(e){ console.log('bond load err',e); }
+}
+function persistBond(){ localStorage.setItem('bondList_v2', JSON.stringify(DATA.bond.groups[0].holdings)); }
+
+loadCd(); loadStock(); loadSimple('cash','cashList_v1'); loadSimple('hsa','hsaList_v1');
+
+// ==================== Google Sheet 接口 ====================
+const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
+
+let monthExpense = {};
+let ledgerRows = [];      // 当月+上月流水明细（来自 Sheet，可改可删）
+let syncOk = false;
+
+// 支出分类：必须与 Shortcut 的 Choose from List 完全一致（顺序也一致）
+const EXP_CATS = ['Bill & utilities','Auto & Gas','Pet','Grocery & Household','Dining',
+                  'Shopping','Health & Beauty','Travel & Entertainment','Home',
+                  'Gifts & Families','Other or unexpected'];
+const EXP_COLORS = {
+  'Bill & utilities':'#e8f0fe', 'Auto & Gas':'#EFEDDA', 'Pet':'#e3f6ea',
+  'Grocery & Household':'#fbf1d9', 'Dining':'#fce7f1', 'Shopping':'#f3e9fd',
+  'Health & Beauty':'#FFF8F2', 'Travel & Entertainment':'#fdecec', 'Home':'#fbf1d9',
+  'Gifts & Families':'#E6DDF6', 'Other or unexpected':'#DCDDE3'
+};
+function curYm(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function matchCat(name){
+  const k=(name||'').trim().toLowerCase();
+  return EXP_CATS.find(function(c){ return c.toLowerCase()===k; }) || null;
+}
+// 从流水明细重算当月各类别合计
+function rebuildMonthExpense(){
+  const ym=curYm(); const m={};
+  ledgerRows.forEach(function(r){
+    if((r.date||'').slice(0,7)!==ym) return;
+    const cat=(r.category||'UNCATEGORIZED').trim();
+    m[cat]=(m[cat]||0)+(parseFloat(r.amount)||0);
+  });
+  monthExpense=m;
+}
+
+function setSyncBadge(state, extra){
+  const el=document.getElementById('syncBadge');
+  if(!el) return;
+  el.classList.remove('err');
+  if(state==='loading'){ el.textContent='同步中…'; }
+  else if(state==='ok'){
+    const t=new Date();
+    el.textContent='已同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+' · Google Sheet';
+  }else if(state==='writeerr'){
+    el.classList.add('err');
+    el.textContent='写入 Sheet 失败：'+(extra||'未知原因');
+  }else{
+    el.classList.add('err');
+    el.textContent='同步失败，正在使用本地数据';
+  }
+}
+
+// ---- 写 Sheet：串行队列 + GET（可拿到回执，写失败会明确报出来）----
+let sheetQueue = Promise.resolve();
+function apiWrite(payload){
+  sheetQueue = sheetQueue.then(function(){
+    const qs = Object.keys(payload).map(function(k){
+      const v = payload[k];
+      return encodeURIComponent(k)+'='+encodeURIComponent(v==null?'':v);
+    }).join('&');
+    return fetch(SHEET_API+'?'+qs+'&_t='+Date.now())
+      .then(function(r){ return r.json(); })
+      .then(function(res){
+        if(res && (res.status==='success' || res.status==='skipped')){
+          setSyncBadge('ok');
+          return res;
+        }
+        setSyncBadge('writeerr', (res&&res.message)||'写入被拒绝');
+        return res||{status:'error'};
+      });
+  }).catch(function(e){
+    console.log('sheet write failed', e);
+    setSyncBadge('writeerr', '网络错误');
+    return {status:'error', message:String(e)};
+  });
+  return sheetQueue;
+}
+const pushToSheet = apiWrite;   // 兼容旧调用点
+function syncStockToSheet(it){
+  if(!it) return;
+  apiWrite({action:'updateStock', symbol:normSym(it.sym),
+            shares:Number(it.shares.toFixed(4)), cost:Number(it.cost.toFixed(4))});
+}
+function syncCashToSheet(){
+  apiWrite({action:'updateCash', amount:loadBrokerCash()});
+}
+
+// ---- 读 Sheet ----
+function syncStockFromSheet(){
+  setSyncBadge('loading');
+  return fetch(SHEET_API+'?_t='+Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(!data || data.status!=='success' || !data.stock){ throw new Error('bad payload'); }
+      rebuildStockGroups(data.stock);
+      persistStock();
+      ledgerRows = Array.isArray(data.ledger) ? data.ledger : [];
+      syncOk = true;
+      // 固定支出：把本月该记的自动写进 Ledger（Sheet 端按 key 去重）
+      return runFixedExpenses().then(function(){
+        rebuildMonthExpense();
+        deductExpenseFromCash(monthExpense);
+        runPayroll();
+        runRecurring();
+        setSyncBadge('ok');
+        recompute();
+        if(document.getElementById('cashTabBody')) renderCashTabBody();
+        refreshOpenDetail();
+      });
+    })
+    .catch(function(e){
+      console.log('sheet sync failed', e);
+      syncOk = false;
+      runPayroll();
+      setSyncBadge('err');
+      recompute();
+    });
+}
+
+// 改完一笔支出后：重新拉流水并刷新界面
+function reloadLedger(){
+  return fetch(SHEET_API+'?_t='+Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(data && data.status==='success'){
+        ledgerRows = Array.isArray(data.ledger) ? data.ledger : [];
+        rebuildMonthExpense();
+        deductExpenseFromCash(monthExpense);
+        recompute();
+        if(document.getElementById('cashTabBody')) renderCashTabBody();
+      }
+    })
+    .catch(function(e){ console.log('reload ledger failed', e); });
+}
+
+function rebuildStockGroups(rows){
+  const groups = emptyStockGroups();
+  const groupByCat = {};
+  groups.forEach(function(g){ groupByCat[g.cat]=g; });
+
+  rows.forEach(function(row){
+    const rawSym = (row.symbol||'').toString().trim();
+    if(!rawSym) return;
+    const sym = normSym(rawSym);
+
+    // 券商现金行：金额存在 E 列（借用 Price 位置）
+    if(sym==='CASH' || rawSym==='现金'){
+      const g = groupByCat[GOLD_CAT];
+      const sheetCash = parseFloat(row.price);
+      const cashVal = isFinite(sheetCash) ? sheetCash : loadBrokerCash();
+      saveBrokerCash(cashVal);
+      g.holdings.push({sym:'现金', noprice:true, mv:Math.round(cashVal), desc:'券商可用·可点击编辑'});
+      return;
+    }
+
+    const rawCat = (row.category||'').toString().trim();
+    const appCat = CAT_MAP[rawCat] || THEME_CAT;
+    const g = groupByCat[appCat] || groupByCat[THEME_CAT];
+    const shares = parseFloat(row.shares)||0;
+    const cost = parseFloat(row.cost)||0;
+    const price = parseFloat(row.price)||0;
+    g.holdings.push({
+      sym: sym,
+      shares: shares,
+      cost: cost||price,
+      price: price,
+      desc: SYM_DESC[sym] || ''
+    });
+  });
+  DATA.stock.groups = groups.filter(function(g){ return g.holdings.length>0; });
+}
+
+// ==================== 支出自动扣现金 ====================
 function loadExpenseDeductState(){
   try{ return JSON.parse(localStorage.getItem('expenseDeducted_v1')||'{"ym":"","total":0}'); }
   catch(e){ return {ym:"",total:0}; }
@@ -412,135 +562,198 @@ function deductExpenseFromCash(expenseMap){
   const ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
   const newTotal=Object.values(expenseMap||{}).reduce(function(s,v){ return s+(parseFloat(v)||0); },0);
   let st=loadExpenseDeductState();
-  if(st.ym!==ym){ st={ym:ym, total:0}; }   // 新的一个月，已扣记录清零重新累计
+  if(st.ym!==ym){ st={ym:ym, total:0}; }
   const delta=newTotal-st.total;
-  if(delta>0.001){
-    const c=DATA.cash.groups[0].holdings.find(function(x){return x.sym==='Chase';});
-    if(c){ c.mv=Math.round((c.mv||0)-delta); persistSimple('cash','cashList_v1'); }
+  if(Math.abs(delta)>0.001){
+    const c=chaseItem();
+    if(c){ c.mv=Math.round((c.mv||0)-delta); persistSimple('cash','cashList_v1'); }  // delta<0 时自动加回
   }
   st.total=newTotal;
   saveExpenseDeductState(st);
 }
-const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
 
-// Sheet 的 category -> 小程序分组的映射
-// 股票分类的唯一数据源：Sheet类别 -> {小程序组名, 子标题, 是否半导体}
-const SYM_DESC = {
-  ASMI:'\u96c7\u4e3b\u80a1\u00b7\u5df2\u5f52\u5c5e', ASMIY:'\u96c7\u4e3b\u80a1\u00b7\u5df2\u5f52\u5c5e',
-  TSM:'\u53f0\u79ef\u7535\u00b7\u4ee3\u5de5', NVDA:'\u82f1\u4f1f\u8fbe\u00b7\u82af\u7247', MU:'\u7f8e\u5149\u00b7\u5b58\u50a8',
-  VOO:'Vanguard \u6807\u666e500', SPY:'SPDR \u6807\u666e500', GOOG:'Alphabet', COST:'Costco',
-  VHT:'Vanguard \u533b\u7597', VEA:'\u53d1\u8fbe\u5e02\u573a\u00b7\u9664\u7f8e', VXUS:'\u5168\u7403\u9664\u7f8e',
-  AVUV:'\u7f8e\u56fd\u5c0f\u76d8\u4ef7\u503c', AVLV:'\u7f8e\u56fd\u5927\u76d8\u4ef7\u503c',
-  PPA:'\u822a\u7a7a\u56fd\u9632', GRID:'\u667a\u80fd\u7535\u7f51', NLR:'\u6838\u80fd\u00b7\u94c0', SPCX:'SpaceX\u00b7\u592a\u7a7a',
-  IAU:'\u9ec4\u91d1', BTCUSD:'\u6bd4\u7279\u5e01', BTC:'\u6bd4\u7279\u5e01'
-};
-
-function syncStockFromSheet(){
-  fetch(SHEET_API)
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      if(!data || data.status!=='success' || !data.stock) return;
-      if(data.expense){ monthExpense = data.expense; deductExpenseFromCash(monthExpense); }
-      rebuildStockGroups(data.stock);
-      persistStock();
-      // 重新计算并刷新界面
-      recomputeAll();
-      if(typeof renderCashTabBody==='function' && document.getElementById('cashTabBody')){
-        renderCashTabBody();
-      }
-    })
-    .catch(function(e){ console.log('sheet sync failed', e); });
+// ==================== 固定支出引擎 ====================
+// 配置存 localStorage（这是设置，不是流水）；防重复键存在 Sheet 的 E 列，
+// 所以手机和电脑各打开一次也不会重复记账。
+function loadFixed(){
+  try{ return JSON.parse(localStorage.getItem('fixedExpenses_v1')||'[]'); }catch(e){ return []; }
 }
+function saveFixed(list){ localStorage.setItem('fixedExpenses_v1', JSON.stringify(list)); }
 
-function rebuildStockGroups(rows){
-  // 按 GROUP_META 顺序建空组
-  const groups = GROUP_META.map(function(m){
-    return {cat:m.cat, sub:m.sub, semi:m.semi||false, holdings:[]};
-  });
-  const groupByCat = {};
-  groups.forEach(function(g){ groupByCat[g.cat]=g; });
+const FREQ_LABEL={monthly:'每月',quarterly:'每季度',semiannual:'每半年',annual:'每年'};
+const FREQ_MONTHS={monthly:1,quarterly:3,semiannual:6,annual:12};
 
-  rows.forEach(function(row){
-    const sym = (row.symbol||'').toString().trim();
-    if(!sym) return;
-    // 现金：作为 noprice 放进"黄金·加密·现金"组
-    if(sym.toLowerCase()==='cash' || sym==='\u73b0\u91d1'){
-      const g = groupByCat['\u9ec4\u91d1 \u00b7 \u52a0\u5bc6 \u00b7 \u73b0\u91d1'];
-      // 方案A：以 Sheet 的 E 列(price)为准；Sheet 为空时用本地值
-      const sheetCash = parseFloat(row.price);
-      const cashVal = isFinite(sheetCash) ? sheetCash : loadBrokerCash();
-      saveBrokerCash(cashVal);   // 同步到本地
-      g.holdings.push({sym:'\u73b0\u91d1', noprice:true, mv:Math.round(cashVal), desc:'\u5238\u5546\u53ef\u7528\u00b7\u53ef\u70b9\u51fb\u7f16\u8f91'});
-      return;
-    }
-    const rawCat = (row.category||'').toString().trim();
-    const appCat = CAT_MAP[rawCat] || '\u4e3b\u9898 ETF'; // 未知归入主题
-    const g = groupByCat[appCat] || groupByCat['\u4e3b\u9898 ETF'];
-    const shares = parseFloat(row.shares)||0;
-    const cost = parseFloat(row.cost)||0;
-    const price = parseFloat(row.price)||0;
-    g.holdings.push({
-      sym: sym,
-      shares: shares,
-      cost: cost||price,   // 成本为空时暂用现价（利润0）
-      price: price,
-      desc: SYM_DESC[sym] || ''
+// 从起始日按频率推进，列出所有「已经到期且在最近 60 天内」的应记日期
+function dueDates(item){
+  const out=[];
+  if(!item.start || !(item.amount>0)) return out;
+  const today=new Date(); today.setHours(0,0,0,0);
+  const floor=new Date(today); floor.setDate(floor.getDate()-60);   // 不倒补太久以前的
+  const step=FREQ_MONTHS[item.freq]||1;
+  let d=new Date(item.start+'T00:00:00');
+  let guard=0;
+  while(d<=today && guard++<400){
+    if(d>=floor) out.push(d.toISOString().slice(0,10));
+    d=new Date(d); d.setMonth(d.getMonth()+step);
+  }
+  return out;
+}
+// 已经在 Sheet 里存在的 key
+function ledgerHasKey(k){
+  return ledgerRows.some(function(r){ return (r.key||'')===k; });
+}
+function runFixedExpenses(){
+  const list=loadFixed().filter(function(x){ return x.enabled!==false; });
+  const jobs=[];
+  list.forEach(function(it){
+    dueDates(it).forEach(function(ds){
+      const key='fix:'+it.id+':'+ds;
+      if(ledgerHasKey(key)) return;
+      jobs.push({item:it, date:ds, key:key});
     });
   });
-  // 去掉没有持仓的空组
-  DATA.stock.groups = groups.filter(function(g){ return g.holdings.length>0; });
+  if(!jobs.length) return Promise.resolve();
+  let chain=Promise.resolve();
+  jobs.forEach(function(j){
+    chain=chain.then(function(){
+      return apiWrite({action:'autoLedger', key:j.key, date:j.date,
+                       category:j.item.category, amount:j.item.amount,
+                       note:j.item.name+'（固定）'}).then(function(res){
+        if(res && res.status==='success'){
+          ledgerRows.push({row:res.row, date:j.date, category:j.item.category,
+                           amount:j.item.amount, note:j.item.name+'（固定）', key:j.key});
+        }else if(res && res.status==='skipped'){
+          // Sheet 里已存在（多设备场景），本地补一条占位，避免重复判断
+          ledgerRows.push({row:res.row, date:j.date, category:j.item.category,
+                           amount:j.item.amount, note:j.item.name+'（固定）', key:j.key});
+        }
+      });
+    });
+  });
+  return chain;
 }
 
-// 全量重算 + 刷新总览（含配置条、卡片、集中度、当前详情页）
-function recomputeAll(){
-  recompute();
-  // 刷新半导体集中度仪表盘
-  const stockTotal2 = classTotal.stock;
-  const semiG = DATA.stock.groups.find(function(g){return g.semi;});
-  const semiT = semiG? sumH(semiG):0;
-  const semiP = stockTotal2>0? semiT/stockTotal2*100:0;
-  const fillEl=document.getElementById('semiFill');
-  if(fillEl){
-    fillEl.style.width=Math.min(semiP/80*100,100)+'%';
-    fillEl.style.background=semiP<=20?'var(--pos)':semiP<=40?'#c2820a':'var(--neg)';
-    document.getElementById('semiPc').textContent=semiP.toFixed(1)+'%';
+// ---- 固定支出：内嵌在 Bill & utilities / Auto & Gas / Pet 的明细页里 ----
+const FIXED_CATS = ['Bill & utilities','Auto & Gas','Pet'];
+let editingFixedId=null;
+
+// 生成某个分类下的「固定支出」区块
+function renderFixedSection(cat){
+  const list=loadFixed().filter(function(x){ return x.category===cat; });
+  const monthly=list.filter(x=>x.enabled!==false)
+    .reduce(function(s,x){ return s + (x.amount||0)/(FREQ_MONTHS[x.freq]||1); },0);
+  let html='<div style="display:flex;align-items:baseline;margin:18px 2px 8px">'+
+    '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">固定支出</div>'+
+    '<div class="num" style="font-size:12px;color:var(--ink-faint)">折合每月 $'+fmt(Math.round(monthly))+'</div></div>';
+  if(list.length){
+    html+='<div class="group" style="background:'+EXP_COLORS[cat]+';border-color:rgba(0,0,0,.08)">'+
+      list.map(function(x){
+        const off=(x.enabled===false);
+        return '<div class="row" style="cursor:pointer;border-color:rgba(0,0,0,.06);'+(off?'opacity:.45':'')+'" onclick="editFixed(\''+x.id+'\')">'+
+          '<div class="tk" style="width:auto;flex:1"><div class="sym" style="font-size:13px">'+x.name+(off?' · 已停用':'')+'</div>'+
+          '<div class="qty">'+(FREQ_LABEL[x.freq]||'每月')+' · '+(x.start||'').replace(/-/g,'/')+' 起</div></div>'+
+          '<div class="val"><div class="mv">$'+fmt(x.amount)+'</div></div></div>';
+      }).join('')+'</div>';
   }
-  // 若当前正在股票详情页，重绘
-  const detailTitle=document.getElementById('d-title');
-  if(document.getElementById('scr-detail').classList.contains('active') && detailTitle && detailTitle.textContent===DATA.stock.name){
-    openDetail('stock');
+  html+='<div class="addbox" style="border-color:rgba(0,0,0,.12);background:'+EXP_COLORS[cat]+'" onclick="showFixedForm(\''+cat.replace(/'/g,"\\'")+'\')">'+
+    '<div class="plus" style="color:var(--ink-2)">+</div>'+
+    '<div class="lbl">添加固定支出 · 到期自动记账</div></div>'+
+    '<div id="fixedFormWrap"></div>';
+  return html;
+}
+
+function fixedFormHtml(v, cat){
+  v=v||{};
+  const st='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  const freq=v.freq||'monthly';
+  return '<div class="editform" style="border-color:rgba(0,0,0,.12)">'+
+    '<div style="font-size:12px;color:var(--ink-faint);margin-bottom:12px">归入 '+cat+'</div>'+
+    '<div class="fld"><label>名称</label><input id="fx-name" value="'+(v.name||'')+'" placeholder="例：房贷月供 / 车保险 / 宠物保险" autocomplete="off"></div>'+
+    '<div class="fld"><label>金额 ($)</label><input id="fx-amt" type="number" inputmode="decimal" value="'+(v.amount!=null?v.amount:'')+'" placeholder="例：2025"></div>'+
+    '<div class="fld"><label>频率</label><select id="fx-freq" style="'+st+'">'+
+      Object.keys(FREQ_LABEL).map(function(k){ return '<option value="'+k+'"'+(freq===k?' selected':'')+'>'+FREQ_LABEL[k]+'</option>'; }).join('')+
+    '</select></div>'+
+    '<div class="fld"><label>首次扣款日</label><input id="fx-start" type="date" value="'+(v.start||'')+'"></div>'+
+    '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:10px">只补记最近 60 天内到期的。若这笔本月已经扣过、余额也已反映，把日期设成下个月。</div>'+
+    '<div class="btns">'+
+      '<button class="cancel" onclick="cancelFixedForm()">取消</button>'+
+      '<button class="save" style="background:var(--cash)" onclick="saveFixed_(\''+cat.replace(/'/g,"\\'")+'\')">保存</button>'+
+    '</div>'+
+    (v.id?'<div class="delrow"><div class="btns">'+
+      '<button class="cancel" onclick="toggleFixed(\''+v.id+'\')">'+(v.enabled===false?'重新启用':'暂停')+'</button>'+
+      '<button class="danger" onclick="deleteFixed(\''+v.id+'\')">删除</button>'+
+    '</div></div>':'')+
+  '</div>';
+}
+function cancelFixedForm(){ editingFixedId=null; renderCashTabBody(); }
+function showFixedForm(cat){
+  const w=document.getElementById('fixedFormWrap');
+  if(!w) return;
+  if(w.innerHTML && !editingFixedId){ w.innerHTML=''; return; }
+  editingFixedId=null;
+  w.innerHTML=fixedFormHtml({}, cat);
+  document.getElementById('fx-name').focus();
+  w.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function editFixed(id){
+  const it=loadFixed().find(function(x){ return x.id===id; });
+  if(!it) return;
+  if(editingFixedId===id){ cancelFixedForm(); return; }
+  editingFixedId=id;
+  const w=document.getElementById('fixedFormWrap');
+  if(!w) return;
+  w.innerHTML=fixedFormHtml(it, it.category);
+  w.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function saveFixed_(cat){
+  const name=document.getElementById('fx-name').value.trim();
+  const amt=parseFloat(document.getElementById('fx-amt').value);
+  const freq=document.getElementById('fx-freq').value;
+  const start=document.getElementById('fx-start').value;
+  if(!name || !(amt>0) || !start){ alert('请填写名称、金额、首次扣款日'); return; }
+  const list=loadFixed();
+  if(editingFixedId){
+    const it=list.find(function(x){ return x.id===editingFixedId; });
+    if(it){ it.name=name; it.amount=Math.round(amt*100)/100; it.freq=freq; it.start=start; }
+  }else{
+    list.push({id:'f'+Date.now(), name:name, amount:Math.round(amt*100)/100,
+               category:cat, freq:freq, start:start, enabled:true});
   }
+  saveFixed(list);
+  editingFixedId=null;
+  renderCashTabBody();
+  runFixedExpenses().then(function(){
+    rebuildMonthExpense(); deductExpenseFromCash(monthExpense);
+    recompute(); renderCashTabBody();
+  });
 }
-syncStockFromSheet();
-
-// ---- 现金 / HSA：简单本地存储 ----
-function loadSimple(cls, key){
-  try{
-    const raw=localStorage.getItem(key);
-    if(raw){ DATA[cls].groups[0].holdings = JSON.parse(raw); }
-    else{ localStorage.setItem(key, JSON.stringify(DATA[cls].groups[0].holdings)); }
-  }catch(e){}
+function toggleFixed(id){
+  const list=loadFixed();
+  const it=list.find(function(x){ return x.id===id; });
+  if(it){ it.enabled=(it.enabled===false); saveFixed(list); }
+  editingFixedId=null; renderCashTabBody();
 }
-function persistSimple(cls, key){ localStorage.setItem(key, JSON.stringify(DATA[cls].groups[0].holdings)); }
-loadSimple('cash','cashList_v1');
-loadSimple('hsa','hsaList_v1');
+function deleteFixed(id){
+  if(!confirm('删除这项固定支出？\n已经写进 Ledger 的历史记录不会被删。')) return;
+  saveFixed(loadFixed().filter(function(x){ return x.id!==id; }));
+  editingFixedId=null; renderCashTabBody();
+}
 
-// ==================== 收入引擎（Payroll 每两周自动 + Bonus 手动）====================
+// ==================== 收入引擎 ====================
 function loadIncome(){
   try{ return JSON.parse(localStorage.getItem('incomeConfig_v1')||'{"payroll":null,"lastPayDate":null}'); }
   catch(e){ return {payroll:null,lastPayDate:null}; }
 }
 function saveIncome(cfg){ localStorage.setItem('incomeConfig_v1', JSON.stringify(cfg)); }
 function addToChase(amt){
-  const c=DATA.cash.groups[0].holdings.find(x=>x.sym==='Chase');
+  const c=chaseItem();
   if(c){ c.mv=Math.round((c.mv||0)+amt); persistSimple('cash','cashList_v1'); }
 }
-// 打开时结算 payroll：按设定频率（weekly/biweekly/monthly）从 lastPayDate 起补发
 function nextPayDate(d, freq){
   const n=new Date(d);
   if(freq==='weekly'){ n.setDate(n.getDate()+7); }
   else if(freq==='monthly'){ n.setMonth(n.getMonth()+1); }
-  else{ n.setDate(n.getDate()+14); }   // biweekly（默认）
+  else{ n.setDate(n.getDate()+14); }
   return n;
 }
 function runPayroll(){
@@ -552,10 +765,8 @@ function runPayroll(){
   const today=new Date(); today.setHours(0,0,0,0);
   let paid=false;
   if(!cfg.lastPayDate){
-    // 发放起始日当天先发一次
     if(new Date(cfg.payroll.start+'T00:00:00')<=today){ addToChase(amt); last=new Date(cfg.payroll.start+'T00:00:00'); paid=true; }
   }
-  // 之后按频率补发
   while(true){
     const next=nextPayDate(last, freq);
     if(next<=today){ addToChase(amt); last=next; paid=true; } else break;
@@ -563,109 +774,83 @@ function runPayroll(){
   if(paid){ cfg.lastPayDate=last.toISOString().slice(0,10); saveIncome(cfg); }
 }
 
-runPayroll();
-runRecurring();
-
-
+// ==================== 储蓄 / 国债 滚息 ====================
 function daysBetween(d1,d2){ return Math.max(0, Math.round((d2 - d1)/86400000)); }
 function rollCd(item){
-  if(item.baseMv==null){ item.baseMv=item.mv||0; item.updated=item.updated||'2026-07-31'; item.rate=item.rate||0; }
+  if(item.baseMv==null){ item.baseMv=item.mv||0; item.updated=item.updated||ASOF; item.rate=item.rate||0; }
   const start=new Date(item.updated+'T00:00:00');
   const today=new Date(); today.setHours(0,0,0,0);
   const days=daysBetween(start,today);
   const interest=item.baseMv*(item.rate/100)/365*days;
   item.mv=Math.round(item.baseMv+interest);
   item.qty=(item.rate?item.rate+'%':'');
-  item.desc=(item.mat?('\u5230\u671f '+item.mat.replace(/-/g,'/')):'')+(days>0?('  \u00b7  \u4f30\u606f +$'+interest.toFixed(0)):'');
+  item.desc=(item.mat?('到期 '+item.mat.replace(/-/g,'/')):'')+(days>0?('  ·  估息 +$'+interest.toFixed(0)):'');
   return item;
 }
 function rollAllCd(){ DATA.cd.groups[0].holdings.forEach(rollCd); }
-rollAllCd();
 
-// ---- 国债：本地存储 + 每年计息（简单：本金 × 年利率 × 年数）----
-function loadBond(){
-  try{
-    localStorage.removeItem('bondList'); // legacy清理占位
-    const raw = localStorage.getItem('bondList_v2');
-    if(raw){ DATA.bond.groups[0].holdings = JSON.parse(raw); }
-    else{ localStorage.setItem('bondList_v2', JSON.stringify(DATA.bond.groups[0].holdings)); }
-  }catch(e){ console.log('bond load err',e); }
-}
-function persistBond(){ localStorage.setItem('bondList_v2', JSON.stringify(DATA.bond.groups[0].holdings)); }
-// 根据起始日+期限算到期日
 function calcMaturity(startStr, termYears){
   if(!startStr||!termYears) return '';
   const d=new Date(startStr+'T00:00:00');
   d.setFullYear(d.getFullYear()+parseInt(termYears));
   return d.toISOString().slice(0,10);
 }
-// 待处理的国债利息弹窗队列
 let bondInterestQueue = [];
 function rollBond(item){
-  // 兼容旧数据
   if(item.baseMv==null){ item.baseMv=item.mv||0; }
-  if(!item.start){ item.start=item.updated||'2026-07-31'; }
+  if(!item.start){ item.start=item.updated||ASOF; }
   if(!item.term){ item.term=1; }
   if(!item.btype){ item.btype='T-Note'; }
   item.mat = calcMaturity(item.start, item.term);
   const today=new Date(); today.setHours(0,0,0,0);
-  const start=new Date(item.start+'T00:00:00');
 
   if(item.btype==='I-Bond'){
-    // I-Bond：每半年复利一次，利息累加进余额（不转现金）
     if(item.lastCompound==null) item.lastCompound=item.start;
     let last=new Date(item.lastCompound+'T00:00:00');
     let bal=item.mv!=null?item.mv:item.baseMv;
     let compounded=false;
     while(true){
       const next=new Date(last); next.setMonth(next.getMonth()+6);
-      if(next<=today){
-        bal = bal * (1 + (item.rate/100)/2);   // 半年复利
-        last = next; compounded=true;
-      } else break;
+      if(next<=today){ bal = bal * (1 + (item.rate/100)/2); last = next; compounded=true; } else break;
     }
     if(compounded){ item.mv=Math.round(bal); item.lastCompound=last.toISOString().slice(0,10); }
     else if(item.mv==null){ item.mv=item.baseMv; }
     item.qty=(item.rate?item.rate+'%':'');
-    item.desc='I-Bond \u00b7 '+(item.mat?('\u5230\u671f '+item.mat.replace(/-/g,'/')):'');
+    item.desc='I-Bond · '+(item.mat?('到期 '+item.mat.replace(/-/g,'/')):'');
   } else if(item.btype==='T-Bill'){
-    // T-Bill：到期一次性兑付，期间余额不变（折价收益略过）
     item.mv=item.baseMv;
     item.qty=(item.rate?item.rate+'%':'');
-    item.desc='T-Bill \u00b7 '+(item.mat?('\u5230\u671f '+item.mat.replace(/-/g,'/')):'');
+    item.desc='T-Bill · '+(item.mat?('到期 '+item.mat.replace(/-/g,'/')):'');
   } else {
-    // T-Note：每半年生成利息（本金×利率÷2），排队弹窗转现金
-    item.mv=item.baseMv;  // 本金不变，利息是打出去的
+    item.mv=item.baseMv;
     if(item.lastCoupon==null) item.lastCoupon=item.start;
     let last=new Date(item.lastCoupon+'T00:00:00');
     while(true){
       const next=new Date(last); next.setMonth(next.getMonth()+6);
       if(next<=today){
         const amt=Math.round(item.baseMv*(item.rate/100)/2);
-        if(amt>0){
-          bondInterestQueue.push({
-            label:'T-Note '+item.term+'Y',
-            amount:amt,
-            date:next.toISOString().slice(0,10)
-          });
-        }
+        if(amt>0){ bondInterestQueue.push({label:item.sym||('T-Note '+item.term+'Y'), amount:amt, date:next.toISOString().slice(0,10)}); }
         last=next;
       } else break;
     }
     item.lastCoupon=last.toISOString().slice(0,10);
     item.qty=(item.rate?item.rate+'%':'');
-    item.desc='T-Note \u00b7 '+(item.mat?('\u5230\u671f '+item.mat.replace(/-/g,'/')):'');
+    item.desc='T-Note · '+(item.mat?('到期 '+item.mat.replace(/-/g,'/')):'');
   }
   return item;
 }
-function rollAllBond(){
-  bondInterestQueue=[];
+// 只在启动时扫描一次利息，之后 recompute 不再重复排队
+let bondScanned = false;
+function rollAllBond(scanInterest){
+  if(scanInterest){ bondInterestQueue=[]; }
+  const keep = bondInterestQueue.slice();
   DATA.bond.groups[0].holdings.forEach(rollBond);
+  if(!scanInterest){ bondInterestQueue = keep; }
   persistBond();
 }
-loadBond(); rollAllBond();
+loadBond(); rollAllBond(true); bondScanned=true;
 
-// ---- 401k 自动增长（每月：+缴款，+按年化的月回报）----
+// ==================== 401k ====================
 function load401k(){
   try{
     const raw=localStorage.getItem('k401_v1');
@@ -685,18 +870,51 @@ function roll401k(){
   const now=new Date();
   let months=(now.getFullYear()-start.getFullYear())*12+(now.getMonth()-start.getMonth());
   months=Math.max(0,months);
-  const mRet=it.rate/100/12;               // 月回报率
+  const mRet=it.rate/100/12;
   const monthlyCon=(it.empCon||0)+(it.erCon||0);
   let bal=it.baseMv;
   for(let m=0;m<months;m++){ bal=bal*(1+mRet)+monthlyCon; }
   it.mv=Math.round(bal);
-  // 本月预估涨幅（供显示）
-  it._monthGain=Math.round(it.baseMv*mRet+monthlyCon);
-  it.qty=(it.rate?it.rate+'% \u5e74\u56de\u62a5':'');
+  it.qty=(it.rate?it.rate+'% 年回报':'');
 }
 load401k(); roll401k();
 
-const fmt = n => n.toLocaleString('en-US',{maximumFractionDigits:0});
+// ==================== 房贷计算 ====================
+function amortizeNow(){
+  const monthlyRate = PROPERTY.rate/100/12;
+  const start = new Date(PROPERTY.updated+'T00:00:00');
+  const now = new Date();
+  let months = (now.getFullYear()-start.getFullYear())*12 + (now.getMonth()-start.getMonth());
+  months = Math.max(0, months);
+  let bal = PROPERTY.loan;
+  for(let m=0;m<months;m++){
+    const interest = bal*monthlyRate;
+    let principal = (PROPERTY.payment - interest) + PROPERTY.extra;
+    if(principal>bal) principal=bal;
+    bal -= principal;
+    if(bal<=0){ bal=0; break; }
+  }
+  return Math.round(bal);
+}
+function payoffEstimate(){
+  const monthlyRate = PROPERTY.rate/100/12;
+  let bal = amortizeNow();
+  let months=0, totalInterest=0;
+  const pay = PROPERTY.payment + PROPERTY.extra;
+  while(bal>0 && months<600){
+    const interest = bal*monthlyRate;
+    let principal = pay - interest;
+    if(principal<=0){ months=-1; break; }
+    if(principal>bal) principal=bal;
+    totalInterest += interest;
+    bal -= principal;
+    months++;
+  }
+  return {months, totalInterest:Math.round(totalInterest)};
+}
+
+// ==================== 汇总与总览渲染 ====================
+const fmt = n => (n||0).toLocaleString('en-US',{maximumFractionDigits:0});
 function hmv(h){
   if(h.noprice) return h.mv||0;
   if(h.shares!=null && h.price!=null){ h.mv=h.shares*h.price; return h.mv; }
@@ -704,125 +922,164 @@ function hmv(h){
 }
 const sumH = g => (g && g.holdings) ? g.holdings.reduce((s,h)=>s+hmv(h),0) : 0;
 const sumC = c => c.groups.reduce((s,g)=>s+sumH(g),0);
+
 const classTotal={}; let grand=0;
-ALL.forEach(k=>{classTotal[k]=sumC(DATA[k]);});
-ORDER.forEach(k=>{grand+=classTotal[k];});
-const stockTotal=classTotal.stock;
-const semiGroup=DATA.stock.groups.find(g=>g.semi);
-const semiTotal=sumH(semiGroup);
-const semiPc=stockTotal>0?(semiTotal/stockTotal*100):0;
+function computeTotals(){
+  grand=0;
+  ALL.forEach(k=>{ classTotal[k]=sumC(DATA[k]); });
+  ORDER.forEach(k=>{ grand+=classTotal[k]; });
+}
 
-document.getElementById('asof').textContent=ASOF;
-document.getElementById('total').textContent=fmt(grand);
-
-const bar=document.getElementById('allocbar');
-const list=document.getElementById('classlist');
-// 配置条：仅计入总额的四类
-ORDER.forEach(k=>{
-  const s=document.createElement('span');
-  s.style.width=(classTotal[k]/grand*100)+'%'; s.style.background=DATA[k].color; bar.appendChild(s);
-});
-// 卡片：先列计入总额的类，再列税优类（不计比例）
-function buildCard(k, counted, isLast){
+function buildCard(listEl, k, counted, isLast, safeGrand){
   const c=DATA[k], t=classTotal[k];
   const card=document.createElement('div');
   card.className='ccard';
-  card.dataset.key=k;   // 关键：把类别名挂到卡片上，让 recompute 能按类别找到卡片
+  card.dataset.key=k;
   card.style.background='var(--'+k+'-bg)';
   card.onclick=()=>openDetail(k);
   const right = counted
-    ? '<div class="mv">$'+fmt(t)+'</div><div class="pc">'+(t/grand*100).toFixed(1)+'%</div>'
-    : '<div class="mv">$'+fmt(t)+'</div><div class="pc" style="color:var(--'+k+')">\u7a0e\u4f18</div>';
+    ? '<div class="mv">$'+fmt(t)+'</div><div class="pc">'+(t/safeGrand*100).toFixed(1)+'%</div>'
+    : '<div class="mv">$'+fmt(t)+'</div><div class="pc" style="color:var(--'+k+')">税优</div>';
   card.innerHTML='<span class="cbar" style="background:'+c.color+'"></span>'+
     '<div class="mid"><div class="nm">'+c.name+'</div>'+(c.meta?'<div class="meta">'+c.meta+'</div>':'')+'</div>'+
     '<div class="amt">'+right+'</div>'+
     '<span class="chev" style="color:'+c.color+'">&rsaquo;</span>';
   if(isLast){
-    // "转账"按钮固定跟随排序后的最后一张卡片
     const rowWrap=document.createElement('div');
     rowWrap.className='cashrow';
     rowWrap.appendChild(card);
     const btn=document.createElement('button');
     btn.className='xfer-btn';
-    btn.innerHTML='<span class="ic">\u21c4</span><span class="tx">\u8f6c\u8d26</span>';
+    btn.innerHTML='<span class="ic">⇄</span><span class="tx">转账</span>';
     btn.onclick=(e)=>{ e.stopPropagation(); openTransfer(); };
     rowWrap.appendChild(btn);
-    list.appendChild(rowWrap);
+    listEl.appendChild(rowWrap);
   }else{
-    list.appendChild(card);
+    listEl.appendChild(card);
   }
 }
-const sortedOrder = ORDER.slice().sort(function(a,b){ return classTotal[b]-classTotal[a]; });
-sortedOrder.forEach(function(k,idx){ buildCard(k,true, idx===sortedOrder.length-1); });
-// 分隔小标题
-const sep=document.createElement('div');
-sep.style.cssText='font-size:11px;color:var(--ink-faint);margin:8px 2px 2px;letter-spacing:.04em;';
-sep.textContent='\u5176\u4ed6\u957f\u671f\u8d44\u4ea7';
-list.appendChild(sep);
-ORDER_TAX.forEach(k=>buildCard(k,false));
 
-// property card (pink, separate)
+function semiGroupOf(){ return DATA.stock.groups.find(function(g){ return g.semi; }); }
+function findHolding(sym){
+  for(const g of DATA.stock.groups){
+    for(const h of g.holdings){ if(normSym(h.sym)===normSym(sym)) return h; }
+  }
+  return null;
+}
+
+function renderSemi(){
+  const stockT = classTotal.stock||0;
+  const semiG = semiGroupOf();
+  const semiT = semiG ? sumH(semiG) : 0;
+  const semiP = stockT>0 ? semiT/stockT*100 : 0;
+  const fill=document.getElementById('semiFill');
+  if(!fill) return;
+  fill.style.width=Math.min(semiP/80*100,100)+'%';
+  fill.style.background=semiP<=20?'var(--pos)':semiP<=40?'#c2820a':'var(--neg)';
+  document.getElementById('semiPc').textContent=semiP.toFixed(1)+'%';
+  const asmi=findHolding('ASMIY');
+  const asmiPc = (asmi && stockT>0) ? (hmv(asmi)/stockT*100) : 0;
+  document.getElementById('semiNote').innerHTML=
+    '半导体 $'+fmt(semiT)+' · 占总投资 '+(grand>0?(semiT/grand*100).toFixed(1):'0.0')+'%。'+
+    (semiP>40?' 仍偏高，可继续减 ASMIY。':' 已接近健康区间。')+
+    ' ASMIY 单一占股票类 '+asmiPc.toFixed(1)+'%。';
+}
+
 function renderPropCard(){
   const bal=amortizeNow();
   const net=PROPERTY.value-bal;
   document.getElementById('propslot').innerHTML=
     '<div class="ccard" style="background:var(--prop-bg);border-color:var(--prop-ln);margin-bottom:18px" onclick="go(\'property\')">'+
     '<span class="cbar" style="background:var(--prop)"></span>'+
-    '<div class="mid"><div class="nm">\u623f\u4ea7</div><div class="meta">\u51c0\u503c \u00b7 \u4f30\u503c $'+fmt(PROPERTY.value)+' \u2212 \u623f\u8d37 $'+fmt(bal)+'</div></div>'+
-    '<div class="amt"><div class="mv">$'+fmt(net)+'</div><div class="pc" style="color:var(--prop)">\u4e0d\u8ba1\u5165</div></div>'+
+    '<div class="mid"><div class="nm">房产</div><div class="meta">净值 · 估值 $'+fmt(PROPERTY.value)+' − 房贷 $'+fmt(bal)+'</div></div>'+
+    '<div class="amt"><div class="mv">$'+fmt(net)+'</div><div class="pc" style="color:var(--prop)">不计入</div></div>'+
     '<span class="chev" style="color:var(--prop)">&rsaquo;</span></div>';
 }
-renderPropCard();
 
-const fill=document.getElementById('semiFill');
-fill.style.width=Math.min(semiPc/80*100,100)+'%';
-fill.style.background=semiPc<=20?'var(--pos)':semiPc<=40?'#c2820a':'var(--neg)';
-document.getElementById('semiPc').textContent=semiPc.toFixed(1)+'%';
-document.getElementById('semiNote').innerHTML=
-  '\u534a\u5bfc\u4f53 $'+fmt(semiTotal)+' \u00b7 \u5360\u603b\u6295\u8d44 '+(semiTotal/grand*100).toFixed(1)+'%\u3002'+
-  (semiPc>40?' \u4ecd\u504f\u9ad8\uff0c\u53ef\u7ee7\u7eed\u51cf ASMI\u3002':' \u5df2\u63a5\u8fd1\u5065\u5eb7\u533a\u95f4\u3002')+
-  ' ASMI \u5355\u4e00\u5360\u80a1\u7968\u7c7b '+((function(){var a=DATA.stock.groups[0].holdings.find(function(x){return x.sym==='ASMI'});return a?hmv(a)/stockTotal*100:0;})()).toFixed(1)+'%\u3002';
+function renderOverview(){
+  computeTotals();
+  const safeGrand = grand>0 ? grand : 1;
+  document.getElementById('asof').textContent=ASOF;
+  document.getElementById('total').textContent=fmt(grand);
 
-function openDetail(k){
+  const bar=document.getElementById('allocbar'); bar.innerHTML='';
+  ORDER.forEach(k=>{
+    const s=document.createElement('span');
+    s.style.width=(classTotal[k]/safeGrand*100)+'%';
+    s.style.background=DATA[k].color;
+    bar.appendChild(s);
+  });
+
+  const list=document.getElementById('classlist'); list.innerHTML='';
+  const sorted = ORDER.slice().sort(function(a,b){ return classTotal[b]-classTotal[a]; });
+  sorted.forEach(function(k,idx){ buildCard(list,k,true, idx===sorted.length-1, safeGrand); });
+  const sep=document.createElement('div');
+  sep.style.cssText='font-size:11px;color:var(--ink-faint);margin:8px 2px 2px;letter-spacing:.04em;';
+  sep.textContent='其他长期资产';
+  list.appendChild(sep);
+  ORDER_TAX.forEach(k=>buildCard(list,k,false,false,safeGrand));
+
+  renderPropCard();
+  renderSemi();
+}
+
+// 全量重算（所有编辑操作后调用）
+function recompute(){
+  rollAllCd(); rollAllBond(false); roll401k();
+  renderOverview();
+}
+// 如果当前停在某个详情页，重绘它
+let currentDetailKey=null;
+function refreshOpenDetail(){
+  if(currentDetailKey && document.getElementById('scr-detail').classList.contains('active')){
+    openDetail(currentDetailKey, true);
+  }
+}
+
+// ==================== 详情页 ====================
+function openDetail(k, keepScroll){
   if(k==='cd') rollAllCd();
-  if(k==='bond') rollAllBond();
+  if(k==='bond') rollAllBond(false);
   if(k==='retire') roll401k();
+  currentDetailKey=k;
+  computeTotals();
   const c=DATA[k], t=classTotal[k];
+  const safeT = t>0 ? t : 1;
   document.getElementById('d-title').textContent=c.name;
   document.getElementById('d-back').style.color=c.color;
   const body=document.getElementById('d-body');
   let html='<div class="dhero" style="background:var(--'+k+'-bg)">'+
     '<div class="l" style="color:'+c.color+'">'+c.meta+'</div>'+
     '<div class="v num"><span class="cur">$</span>'+fmt(t)+'</div>'+
-    '<div class="s">'+(ORDER.includes(k)?('\u5360\u6295\u8d44\u603b\u989d '+(t/grand*100).toFixed(1)+'%'):'\u7a0e\u4f18\u8d26\u6237 \u00b7 \u4e0d\u8ba1\u5165\u6295\u8d44\u603b\u989d')+'</div></div>';
+    '<div class="s">'+(ORDER.includes(k)?('占投资总额 '+(grand>0?(t/grand*100).toFixed(1):'0.0')+'%'):'税优账户 · 不计入投资总额')+'</div></div>';
+
   c.groups.forEach(function(g,gi){
-    if(k==='cash') return;  // 现金页用收入/支出tab
-    if(!g.holdings || g.holdings.length===0) return;  // 跳过空组（不渲染空壳）
+    if(k==='cash') return;
+    if(!g.holdings || g.holdings.length===0) return;
     var gt=sumH(g);
     var accent = g.semi?'var(--neg)':c.color;
 
-    // 组内所有行的 HTML
     var rowsHtml = g.holdings.map(function(hh,hi){
-      // 股票行：股数 | 成本/利润% | 市值/占比
+      // 股票行
       if(k==='stock' && !hh.noprice && hh.shares!=null){
         var mv=hmv(hh);
-        var prof=(hh.price-hh.cost)/hh.cost*100;
-        var profCol=isFinite(prof)?((prof>=0?'+':'')+prof.toFixed(1)+'%'):'';
+        var prof=(hh.cost>0)?((hh.price-hh.cost)/hh.cost*100):0;
+        var profTxt=isFinite(prof)?((prof>=0?'+':'')+prof.toFixed(1)+'%'):'—';
         var profColor=prof>=0?'var(--pos)':'var(--neg)';
         var sInner='<div class="tk"><div class="sym">'+hh.sym+'</div>'+
-            '<div class="qty">'+(hh.shares%1?hh.shares.toFixed(3):hh.shares)+'\u80a1</div></div>'+
-          '<div class="scost"><div class="ac">$'+hh.cost.toFixed(2)+'</div>'+
-            '<div class="pr" style="color:'+profColor+'">'+profCol+'</div></div>'+
+            '<div class="qty">'+(hh.shares%1?hh.shares.toFixed(3):hh.shares)+'股</div></div>'+
+          '<div class="scost"><div class="ac">$'+(hh.cost||0).toFixed(2)+'</div>'+
+            '<div class="pr" style="color:'+profColor+'">'+profTxt+'</div></div>'+
           '<div class="val"><div class="mv">$'+fmt(mv)+'</div>'+
-            '<div class="pc">'+(mv/t*100).toFixed(1)+'%</div></div>';
+            '<div class="pc">'+(mv/safeT*100).toFixed(1)+'%</div></div>';
         return '<div class="row" style="cursor:pointer" onclick="showStockPanel('+gi+','+hi+')">'+sInner+'</div>'+
           '<div class="stock-slot" id="slot-'+gi+'-'+hi+'"></div>';
       }
-      // 无价条目（券商现金 / CD / 国债 / HSA / 退休）
+      // 无价条目
       var inner='<div class="tk"><div class="sym">'+hh.sym+'</div><div class="qty">'+(hh.qty||'')+'</div></div>'+
-        '<div class="desc">'+hh.desc+'</div>'+
+        '<div class="desc">'+(hh.desc||'')+'</div>'+
         '<div class="val"><div class="mv">$'+fmt(hmv(hh))+'</div>'+
-        '<div class="pc">'+(hmv(hh)/t*100).toFixed(1)+'%</div></div>';
+        '<div class="pc">'+(hmv(hh)/safeT*100).toFixed(1)+'%</div></div>';
       if(k==='cd' || k==='bond'){
         var editFn = k==='cd'?'editCd':'editBond';
         return '<div class="row" style="cursor:pointer" onclick="'+editFn+'('+hi+')">'+inner+'</div>';
@@ -833,50 +1090,40 @@ function openDetail(k){
       if(k==='hsa'){
         return '<div class="row" style="cursor:pointer" onclick="editSimple(\''+k+'\','+hi+')">'+inner+'</div>';
       }
-      if(hh.noprice && hh.sym==='\u73b0\u91d1'){
-        return '<div class="row" style="cursor:pointer" onclick="editBrokerCash()">'+inner+'</div>';
+      if(hh.noprice && hh.sym==='现金'){
+        return '<div class="row" style="cursor:pointer" onclick="editBrokerCash()">'+inner+'</div>'+
+               '<div class="stock-slot" id="cashslot"></div>';
       }
       return '<div class="row">'+inner+'</div>';
     }).join('');
 
-    // 一个大类 = 一张独立卡片（浅色标题 + 彩色左条 + 明细行）
     var headBg = (k==='stock') ? 'var(--stock-head)' : 'var(--'+k+'-bg)';
     html+='<div class="stkgroup" style="background:var(--'+k+'-bg);border-color:var(--'+k+'-ln)">'+
       '<div class="stkgroup-head" style="background:'+headBg+'">'+
         '<span class="stkbar" style="background:'+accent+'"></span>'+
         '<div class="stkcat">'+g.cat+(g.sub?'<span class="stksub">'+g.sub+'</span>':'')+'</div>'+
-        '<span class="stkpc" style="color:'+accent+'">'+(gt/t*100).toFixed(1)+'%</span>'+
+        '<span class="stkpc" style="color:'+accent+'">'+(gt/safeT*100).toFixed(1)+'%</span>'+
       '</div>'+
       '<div class="stkrows">'+rowsHtml+'</div>'+
     '</div>';
   });
 
-  if(k==='cd'){
-    html+='<div id="cdAddWrap"></div>';
-  }
-  if(k==='bond'){
-    html+='<div id="bondAddWrap"></div>';
-  }
-  if(k==='hsa'){
-    html+='<div id="simpleAddWrap"></div>';
-  }
-  if(k==='stock'){
-    html+='<div id="stockAddWrap"></div>';
-  }
-  if(c.ledger){
-    html+='<div id="incomeWrap"></div>';
-  }
+  if(k==='cd')   html+='<div id="cdAddWrap"></div>';
+  if(k==='bond') html+='<div id="bondAddWrap"></div>';
+  if(k==='hsa')  html+='<div id="simpleAddWrap"></div>';
+  if(k==='stock')html+='<div id="stockAddWrap"></div>';
+  if(c.ledger)   html+='<div id="incomeWrap"></div>';
 
   body.innerHTML=html;
-  if(k==='cd'){ renderCdAdd(); attachSwipe(); }
-  if(k==='bond'){ renderBondAdd(); attachSwipe(); }
-  if(k==='stock'){ attachSwipe(); renderStockAdd(); }
-  if(k==='hsa'){ renderSimpleAdd('hsa'); attachSwipe(); }
-  if(k==='cash'){ attachSwipe(); }
-  if(k==='cash'){ renderIncome(); }
-  go('detail');
+  if(k==='cd')   renderCdAdd();
+  if(k==='bond') renderBondAdd();
+  if(k==='stock')renderStockAdd();
+  if(k==='hsa')  renderSimpleAdd('hsa');
+  if(k==='cash') renderIncome();
+  if(!keepScroll) go('detail');
 }
 
+// ==================== 房产页 ====================
 function renderPropPage(){
   const bal=amortizeNow();
   const net=PROPERTY.value-bal;
@@ -884,45 +1131,40 @@ function renderPropPage(){
   const progress=(paidPrincipal/PROPERTY.origLoan*100);
   const est=payoffEstimate();
   const yrs=Math.floor(est.months/12), mos=est.months%12;
-  // 本月拆分
   const mRate=PROPERTY.rate/100/12;
   const thisInterest=bal*mRate;
   const thisPrincipal=(PROPERTY.payment-thisInterest)+PROPERTY.extra;
   document.getElementById('prop-body').innerHTML=
     '<div class="dhero dark" style="border-color:var(--prop)">'+
-      '<div class="l" style="color:var(--prop)">\u623f\u4ea7\u51c0\u503c \u00b7 \u4e0d\u8ba1\u5165\u6295\u8d44\u603b\u989d</div>'+
+      '<div class="l" style="color:var(--prop)">房产净值 · 不计入投资总额</div>'+
       '<div class="v num"><span class="cur">$</span>'+fmt(net)+'</div>'+
-      '<div class="s">\u4f30\u503c $'+fmt(PROPERTY.value)+' \u2212 \u623f\u8d37 $'+fmt(bal)+'</div></div>'+
-    // 还款进度条
+      '<div class="s">估值 $'+fmt(PROPERTY.value)+' − 房贷 $'+fmt(bal)+'</div></div>'+
     '<div class="group" style="background:var(--prop-bg);border-color:var(--prop-ln)">'+
-      '<div class="grp-head" style="border-color:var(--prop-ln)"><div class="cat">\u8fd8\u6b3e\u8fdb\u5ea6</div>'+
+      '<div class="grp-head" style="border-color:var(--prop-ln)"><div class="cat">还款进度</div>'+
       '<span class="gpc" style="color:var(--prop)">'+progress.toFixed(1)+'%</span></div>'+
       '<div style="padding:14px">'+
         '<div style="height:8px;background:#0002;border-radius:4px;overflow:hidden">'+
           '<div style="height:100%;width:'+progress.toFixed(1)+'%;background:var(--prop)"></div></div>'+
         '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--ink-2)">'+
-          '<span>\u5df2\u8fd8\u672c\u91d1 $'+fmt(paidPrincipal)+'</span>'+
-          '<span>\u539f\u8d37 $'+fmt(PROPERTY.origLoan)+'</span></div></div></div>'+
-    // 贷款明细
+          '<span>已还本金 $'+fmt(paidPrincipal)+'</span>'+
+          '<span>原贷 $'+fmt(PROPERTY.origLoan)+'</span></div></div></div>'+
     '<div class="group" style="background:var(--prop-bg);border-color:var(--prop-ln)">'+
-      '<div class="grp-head" style="border-color:var(--prop-ln)"><div class="cat">\u8d37\u6b3e\u660e\u7ec6</div>'+
+      '<div class="grp-head" style="border-color:var(--prop-ln)"><div class="cat">贷款明细</div>'+
       '<span class="gpc" style="color:var(--prop)">'+PROPERTY.rate+'%</span></div>'+
-      propRow('\u5f53\u524d\u4f59\u989d','\u672a\u507f\u672c\u91d1','$'+fmt(bal))+
-      propRow('\u6807\u51c6\u6708\u4f9b','30\u5e74\u671f','$'+fmt(PROPERTY.payment))+
-      propRow('\u989d\u5916\u8fd8\u672c','\u6bcf\u6708\u591a\u8fd8','$'+fmt(PROPERTY.extra))+
-      propRow('\u672c\u6708\u5229\u606f','\u4f59\u989d\u00d7\u6708\u5229\u7387','$'+fmt(Math.round(thisInterest)))+
-      propRow('\u672c\u6708\u8fd8\u672c','\u542b\u989d\u5916','$'+fmt(Math.round(thisPrincipal)))+
+      propRow('当前余额','未偿本金','$'+fmt(bal))+
+      propRow('标准月供','30年期','$'+fmt(PROPERTY.payment))+
+      propRow('额外还本','每月多还','$'+fmt(PROPERTY.extra))+
+      propRow('本月利息','余额×月利率','$'+fmt(Math.round(thisInterest)))+
+      propRow('本月还本','含额外','$'+fmt(Math.round(thisPrincipal)))+
     '</div>'+
-    // 提前还清预估
     '<div class="group" style="background:var(--prop-bg);border-color:var(--prop-ln)">'+
-      '<div class="grp-head" style="border-color:var(--prop-ln)"><div class="cat">\u63d0\u524d\u8fd8\u6e05\u9884\u4f30<span class="sub">\u6309\u5f53\u524d\u6708\u4f9b+\u989d\u5916</span></div></div>'+
-      propRow('\u9884\u8ba1\u8fd8\u6e05','\u4ece\u73b0\u5728\u7b97\u8d77', (est.months<0?'\u6708\u4f9b\u4e0d\u8db3':(yrs+'\u5e74'+(mos?mos+'\u6708':'')) ))+
-      propRow('\u5269\u4f59\u5229\u606f','\u8fd8\u6e05\u524d\u603b\u5229\u606f','$'+fmt(est.totalInterest))+
+      '<div class="grp-head" style="border-color:var(--prop-ln)"><div class="cat">提前还清预估<span class="sub">按当前月供+额外</span></div></div>'+
+      propRow('预计还清','从现在算起', (est.months<0?'月供不足':(yrs+'年'+(mos?mos+'月':'')) ))+
+      propRow('剩余利息','还清前总利息','$'+fmt(est.totalInterest))+
     '</div>'+
-    // 编辑额外还款
     '<div class="addbox" style="border-color:var(--prop-ln);background:var(--prop-bg)" onclick="showExtraForm()">'+
-      '<div class="plus" style="color:var(--prop)">\u270e</div>'+
-      '<div class="lbl">\u7f16\u8f91\u989d\u5916\u8fd8\u6b3e / \u4f30\u503c / \u4f59\u989d</div></div>'+
+      '<div class="plus" style="color:var(--prop)">✎</div>'+
+      '<div class="lbl">编辑额外还款 / 估值 / 余额</div></div>'+
     '<div id="propEditWrap"></div>';
 }
 function propRow(sym,desc,val){
@@ -935,19 +1177,18 @@ function showExtraForm(){
   const wrap=document.getElementById('propEditWrap');
   wrap.innerHTML=
     '<div class="editform" style="border-color:var(--prop-ln)">'+
-      '<div class="fld"><label>\u989d\u5916\u8fd8\u672c ($/\u6708)</label>'+
+      '<div class="fld"><label>额外还本 ($/月)</label>'+
         '<input id="p-extra" type="number" inputmode="decimal" value="'+PROPERTY.extra+'"></div>'+
-      '<div class="fld"><label>\u623f\u4ea7\u4f30\u503c ($)</label>'+
+      '<div class="fld"><label>房产估值 ($)</label>'+
         '<input id="p-value" type="number" inputmode="decimal" value="'+PROPERTY.value+'"></div>'+
-      '<div class="fld"><label>\u5f53\u524d\u8d37\u6b3e\u4f59\u989d ($) \u00b7 \u53ef\u6821\u51c6</label>'+
+      '<div class="fld"><label>当前贷款余额 ($) · 可校准</label>'+
         '<input id="p-loan" type="number" inputmode="decimal" value="'+amortizeNow()+'"></div>'+
-      '<div class="fld"><label>\u4e00\u6b21\u6027\u989d\u5916\u8fd8\u8d37 ($) \u00b7 \u76f4\u63a5\u4ece\u4f59\u989d\u6263\u9664</label>'+
-        '<input id="p-lump" type="number" inputmode="decimal" placeholder="\u4f8b\uff1a10000"></div>'+
+      '<div class="fld"><label>一次性额外还贷 ($) · 直接从余额扣除</label>'+
+        '<input id="p-lump" type="number" inputmode="decimal" placeholder="例：10000"></div>'+
       '<div class="btns">'+
-        '<button class="cancel" onclick="document.getElementById(\'propEditWrap\').innerHTML=\'\'">\u53d6\u6d88</button>'+
-        '<button class="save" style="background:var(--prop)" onclick="saveExtra()">\u4fdd\u5b58</button>'+
+        '<button class="cancel" onclick="document.getElementById(\'propEditWrap\').innerHTML=\'\'">取消</button>'+
+        '<button class="save" style="background:var(--prop)" onclick="saveExtra()">保存</button>'+
       '</div></div>';
-  document.getElementById('p-extra').focus();
 }
 function saveExtra(){
   const extra=parseFloat(document.getElementById('p-extra').value);
@@ -958,7 +1199,6 @@ function saveExtra(){
   if(value>0) PROPERTY.value=Math.round(value);
   if(loan>0){ PROPERTY.loan=Math.round(loan); PROPERTY.updated=new Date().toISOString().slice(0,10); }
   if(lump>0){
-    // 一次性还贷：从当前余额直接扣除
     const cur = (loan>0?Math.round(loan):amortizeNow());
     PROPERTY.loan = Math.max(0, cur - Math.round(lump));
     PROPERTY.updated = new Date().toISOString().slice(0,10);
@@ -967,184 +1207,131 @@ function saveExtra(){
   renderPropPage();
   renderPropCard();
 }
-renderPropPage();
 
-
-// ---- CD 新增：加号框 / 编辑表单 ----
+// ==================== 储蓄 CD：增 / 改 / 删 ====================
+let editingCdIndex = -1;
 function renderCdAdd(){
   const wrap=document.getElementById('cdAddWrap');
   if(!wrap) return;
+  editingCdIndex=-1;
   wrap.innerHTML='<div class="addbox" onclick="showCdForm()">'+
-    '<div class="plus">+</div><div class="lbl">\u6dfb\u52a0\u50a8\u84c4\u8d26\u6237</div></div>';
+    '<div class="plus">+</div><div class="lbl">添加储蓄账户</div></div>';
+}
+function cdFormHtml(vals, isEdit){
+  vals=vals||{};
+  const selStyle='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  return '<div class="editform">'+
+      '<div class="fld"><label>账户名</label>'+
+        '<input id="f-name" value="'+(vals.sym||'')+'" placeholder="例：CD-1234" autocomplete="off"></div>'+
+      '<div class="fld"><label>金额 ($)</label>'+
+        '<input id="f-mv" type="number" inputmode="decimal" value="'+(vals.mv!=null?vals.mv:'')+'" placeholder="例：10000"></div>'+
+      '<div class="fld"><label>利率 (%)</label>'+
+        '<input id="f-rate" type="number" inputmode="decimal" value="'+(vals.rate!=null?vals.rate:'')+'" placeholder="例：4.1"></div>'+
+      '<div class="fld"><label>到期日（活期可留空）</label>'+
+        '<input id="f-mat" type="date" value="'+(vals.mat||'')+'"></div>'+
+      (isEdit?'':'<div class="fld"><label>资金来源</label>'+
+        '<select id="f-src" style="'+selStyle+'">'+
+          '<option value="">无（仅补录）</option>'+
+          '<option value="chase">Checking - Chase</option>'+
+        '</select></div>')+
+      '<div class="btns">'+
+        '<button class="cancel" onclick="renderCdAdd()">取消</button>'+
+        '<button class="save" onclick="saveCd()">保存</button>'+
+      '</div>'+
+      (isEdit?'<div class="delrow"><button class="danger" style="width:100%;border-radius:10px;padding:12px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="deleteCd('+editingCdIndex+')">删除这个账户</button></div>':'')+
+    '</div>';
 }
 function showCdForm(){
-  const wrap=document.getElementById('cdAddWrap');
-  wrap.innerHTML=
-    '<div class="editform">'+
-      '<div class="fld"><label>\u8d26\u6237\u540d</label>'+
-        '<input id="f-name" placeholder="\u4f8b\uff1aCD-1234" autocomplete="off"></div>'+
-      '<div class="fld"><label>\u91d1\u989d ($)</label>'+
-        '<input id="f-mv" type="number" inputmode="decimal" placeholder="\u4f8b\uff1a10000"></div>'+
-      '<div class="fld"><label>\u5229\u7387 (%)</label>'+
-        '<input id="f-rate" type="number" inputmode="decimal" placeholder="\u4f8b\uff1a4.1"></div>'+
-      '<div class="fld"><label>\u5230\u671f\u65e5</label>'+
-        '<input id="f-mat" type="date"></div>'+
-      '<div class="btns">'+
-        '<button class="cancel" onclick="renderCdAdd()">\u53d6\u6d88</button>'+
-        '<button class="save" onclick="saveCd()">\u4fdd\u5b58</button>'+
-      '</div>'+
-    '</div>';
+  editingCdIndex=-1;
+  document.getElementById('cdAddWrap').innerHTML=cdFormHtml({}, false);
   document.getElementById('f-name').focus();
+}
+function editCd(i){
+  editingCdIndex = i;
+  const item = DATA.cd.groups[0].holdings[i];
+  const wrap=document.getElementById('cdAddWrap');
+  wrap.innerHTML=cdFormHtml({sym:item.sym, mv:(item.baseMv!=null?item.baseMv:item.mv), rate:item.rate, mat:item.mat}, true);
+  wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
 function saveCd(){
   const name=document.getElementById('f-name').value.trim();
   const mv=parseFloat(document.getElementById('f-mv').value);
   const rate=parseFloat(document.getElementById('f-rate').value)||0;
   const mat=document.getElementById('f-mat').value;
-  if(!name || !(mv>0)){ alert('\u8bf7\u81f3\u5c11\u586b\u5199\u8d26\u6237\u540d\u548c\u91d1\u989d'); return; }
+  if(!name || !(mv>0)){ alert('请至少填写账户名和金额'); return; }
   const today=new Date().toISOString().slice(0,10);
   const item={sym:name, rate:rate, mat:mat, baseMv:Math.round(mv), updated:today};
   rollCd(item);
   if(editingCdIndex>=0){
-    DATA.cd.groups[0].holdings[editingCdIndex]=item;  // 覆盖编辑
+    DATA.cd.groups[0].holdings[editingCdIndex]=item;
     editingCdIndex=-1;
   }else{
-    DATA.cd.groups[0].holdings.push(item);            // 新增
+    DATA.cd.groups[0].holdings.push(item);
     const srcEl=document.getElementById('f-src');
     if(srcEl && srcEl.value){ deductSource(srcEl.value, item.baseMv); }
   }
   persistCd();
   recompute();
-  openDetail('cd');
+  openDetail('cd', true);
 }
-// 重新计算所有总额与占比（新增后调用）
-function recompute(){
-  rollAllCd(); rollAllBond(); roll401k();
-  grand=0;
-  ALL.forEach(k=>{classTotal[k]=sumC(DATA[k]);});
-  ORDER.forEach(k=>{grand+=classTotal[k];});
-  document.getElementById('total').textContent=fmt(grand);
-  const safeGrand = grand>0 ? grand : 1;  // 避免总额为0时除0出错
-  const bar=document.getElementById('allocbar'); bar.innerHTML='';
-  ORDER.forEach(k=>{const s=document.createElement('span');
-    s.style.width=(classTotal[k]/safeGrand*100)+'%';s.style.background=DATA[k].color;bar.appendChild(s);});
-  // 按每张卡的 data-key 找到自己对应的类别，避免按位置回填导致错位
-  document.querySelectorAll('#classlist .ccard').forEach(function(card){
-    const k=card.dataset.key;
-    if(!k || !ALL.includes(k)) return;
-    const t=classTotal[k];
-    const mvEl=card.querySelector('.amt .mv');
-    if(mvEl) mvEl.textContent='$'+fmt(t);
-    const pcEl=card.querySelector('.amt .pc');
-    if(pcEl && ORDER.includes(k)) pcEl.textContent=(t/safeGrand*100).toFixed(1)+'%';
-  });
-}
-
-
-// ---- \u7f16\u8f91\u5df2\u6709 CD ----
-let editingCdIndex = -1;
-function editCd(i){
-  editingCdIndex = i;
-  const item = DATA.cd.groups[0].holdings[i];
-  const wrap=document.getElementById('cdAddWrap');
-  const rate=(item.rate!=null?item.rate:'');
-  const mat=(item.mat||'');
-  const curMv=(item.baseMv!=null?item.baseMv:item.mv);
-  wrap.innerHTML=
-    '<div class="editform">'+
-      '<div class="fld"><label>\u8d26\u6237\u540d</label>'+
-        '<input id="f-name" value="'+item.sym+'" autocomplete="off"></div>'+
-      '<div class="fld"><label>\u91d1\u989d ($)</label>'+
-        '<input id="f-mv" type="number" inputmode="decimal" value="'+curMv+'"></div>'+
-      '<div class="fld"><label>\u5229\u7387 (%)</label>'+
-        '<input id="f-rate" type="number" inputmode="decimal" value="'+rate+'"></div>'+
-      '<div class="fld"><label>\u5230\u671f\u65e5</label>'+
-        '<input id="f-mat" type="date" value="'+mat+'"></div>'+
-      '<div class="btns">'+
-        '<button class="cancel" onclick="editingCdIndex=-1;renderCdAdd()">\u53d6\u6d88</button>'+
-        '<button class="save" onclick="saveCd()">\u4fdd\u5b58</button>'+
-      '</div>'+
-    '</div>';
-  wrap.scrollIntoView({behavior:'smooth',block:'center'});
-}
-
 function deleteCd(i){
   const item=DATA.cd.groups[0].holdings[i];
-  if(!confirm('\u5220\u9664 '+item.sym+' \uff1f')) return;
+  if(!item) return;
+  if(!confirm('删除 '+item.sym+' ？此操作不可撤销。')) return;
   DATA.cd.groups[0].holdings.splice(i,1);
+  editingCdIndex=-1;
   persistCd();
   recompute();
-  openDetail('cd');
+  openDetail('cd', true);
 }
 
-// swipe gesture: attach after CD detail render
-function attachSwipe(){
-  document.querySelectorAll('#scr-detail .swipe').forEach(function(sw){
-    let startX=0, cur=0, dragging=false;
-    const row=sw.querySelector('.swipe-row');
-    sw.addEventListener('touchstart',function(e){startX=e.touches[0].clientX;dragging=true;row.style.transition='none';},{passive:true});
-    sw.addEventListener('touchmove',function(e){
-      if(!dragging)return;
-      let dx=e.touches[0].clientX-startX;
-      if(sw.classList.contains('open')) dx-=76;
-      dx=Math.max(-76,Math.min(0,dx));
-      cur=dx; row.style.transform='translateX('+dx+'px)';
-    },{passive:true});
-    sw.addEventListener('touchend',function(){
-      dragging=false;row.style.transition='';
-      if(cur<-38){ sw.classList.add('open'); } else { sw.classList.remove('open'); }
-      cur=0;
-    });
-  });
-}
-
-
-// ==================== 国债 编辑 ====================
+// ==================== 国债：增 / 改 / 删 ====================
 let editingBondIndex = -1;
 function renderBondAdd(){
   const wrap=document.getElementById('bondAddWrap');
   if(!wrap) return;
+  editingBondIndex=-1;
   wrap.innerHTML='<div class="addbox" style="border-color:var(--bond-ln);background:var(--bond-bg)" onclick="showBondForm()">'+
-    '<div class="plus" style="color:var(--bond)">+</div><div class="lbl">\u6dfb\u52a0\u56fd\u503a</div></div>';
+    '<div class="plus" style="color:var(--bond)">+</div><div class="lbl">添加国债</div></div>';
 }
-function bondFormHtml(vals){
+function bondFormHtml(vals, isEdit){
   vals=vals||{};
   const selStyle='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
   const btype=vals.btype||'T-Note';
   const term=vals.term||3;
   function typeOpt(v){ return '<option value="'+v+'"'+(btype===v?' selected':'')+'>'+v+'</option>'; }
-  function termOpt(v){ return '<option value="'+v+'"'+(parseInt(term)===v?' selected':'')+'>'+v+'\u5e74</option>'; }
+  function termOpt(v){ return '<option value="'+v+'"'+(parseInt(term)===v?' selected':'')+'>'+v+'年</option>'; }
   return '<div class="editform" style="border-color:var(--bond-ln)">'+
-    '<div class="fld"><label>\u56fd\u503a\u7c7b\u578b</label>'+
-      '<select id="b-type" style="'+selStyle+'" onchange="onBondTypeChange()">'+
+    '<div class="fld"><label>国债类型</label>'+
+      '<select id="b-type" style="'+selStyle+'" onchange="onBondTypeChange('+(isEdit?'true':'false')+')">'+
         typeOpt('I-Bond')+typeOpt('T-Bill')+typeOpt('T-Note')+
       '</select></div>'+
-    '<div class="fld"><label>\u8d77\u59cb\u65e5</label>'+
+    '<div class="fld"><label>起始日</label>'+
       '<input id="b-start" type="date" value="'+(vals.start||'')+'"></div>'+
-    '<div class="fld"><label>\u671f\u9650</label>'+
+    '<div class="fld"><label>期限</label>'+
       '<select id="b-term" style="'+selStyle+'">'+
         termOpt(1)+termOpt(2)+termOpt(3)+termOpt(4)+termOpt(5)+termOpt(10)+termOpt(30)+
       '</select></div>'+
-    '<div class="fld"><label>\u91d1\u989d ($) \u00b7 \u672c\u91d1</label>'+
-      '<input id="b-mv" type="number" inputmode="decimal" value="'+(vals.baseMv!=null?vals.baseMv:'')+'" placeholder="\u4f8b\uff1a10000"></div>'+
-    '<div class="fld"><label>\u5e74\u5229\u7387 (%)'+(btype==='I-Bond'?' \u00b7 \u53ef\u968f\u65f6\u8c03\u6574':'')+'</label>'+
-      '<input id="b-rate" type="number" inputmode="decimal" value="'+(vals.rate!=null?vals.rate:'')+'" placeholder="\u4f8b\uff1a3.75"></div>'+
-    '<div class="fld"><label>\u8d44\u91d1\u6765\u6e90</label>'+
+    '<div class="fld"><label>金额 ($) · 本金</label>'+
+      '<input id="b-mv" type="number" inputmode="decimal" value="'+(vals.baseMv!=null?vals.baseMv:'')+'" placeholder="例：10000"></div>'+
+    '<div class="fld"><label>年利率 (%)'+(btype==='I-Bond'?' · 可随时调整':'')+'</label>'+
+      '<input id="b-rate" type="number" inputmode="decimal" value="'+(vals.rate!=null?vals.rate:'')+'" placeholder="例：3.75"></div>'+
+    (isEdit?'':'<div class="fld"><label>资金来源</label>'+
       '<select id="b-src" style="'+selStyle+'">'+
-        '<option value="">\u65e0\uff08\u4ec5\u8865\u5f55\uff09</option>'+
+        '<option value="">无（仅补录）</option>'+
         '<option value="chase">Checking - Chase</option>'+
         '<option value="marcus">Marcus OS-9250</option>'+
-      '</select></div>'+
+      '</select></div>')+
     '<div class="btns">'+
-      '<button class="cancel" onclick="editingBondIndex=-1;renderBondAdd()">\u53d6\u6d88</button>'+
-      '<button class="save" style="background:var(--bond)" onclick="saveBond()">\u4fdd\u5b58</button>'+
-    '</div></div>';
+      '<button class="cancel" onclick="renderBondAdd()">取消</button>'+
+      '<button class="save" style="background:var(--bond)" onclick="saveBond()">保存</button>'+
+    '</div>'+
+    (isEdit?'<div class="delrow"><button class="danger" style="width:100%;border-radius:10px;padding:12px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="deleteBond('+editingBondIndex+')">删除这笔国债</button></div>':'')+
+    '</div>';
 }
-function onBondTypeChange(){
-  // 重新渲染表单以更新利率标签（I-Bond显示可调整）
+function onBondTypeChange(isEdit){
   const vals=collectBondForm();
-  const wrap=document.getElementById('bondAddWrap');
-  wrap.innerHTML=bondFormHtml(vals);
+  document.getElementById('bondAddWrap').innerHTML=bondFormHtml(vals, isEdit);
 }
 function collectBondForm(){
   return {
@@ -1156,14 +1343,15 @@ function collectBondForm(){
   };
 }
 function showBondForm(){
-  const wrap=document.getElementById('bondAddWrap');
-  wrap.innerHTML=bondFormHtml();
+  editingBondIndex=-1;
+  document.getElementById('bondAddWrap').innerHTML=bondFormHtml({}, false);
 }
 function editBond(i){
   editingBondIndex=i;
   const item=DATA.bond.groups[0].holdings[i];
   const wrap=document.getElementById('bondAddWrap');
-  wrap.innerHTML=bondFormHtml({btype:item.btype, start:item.start, term:item.term, baseMv:(item.baseMv!=null?item.baseMv:item.mv), rate:item.rate});
+  wrap.innerHTML=bondFormHtml({btype:item.btype, start:item.start, term:item.term,
+    baseMv:(item.baseMv!=null?item.baseMv:item.mv), rate:item.rate}, true);
   wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
 function saveBond(){
@@ -1172,14 +1360,12 @@ function saveBond(){
   const term=document.getElementById('b-term').value;
   const mv=parseFloat(document.getElementById('b-mv').value);
   const rate=parseFloat(document.getElementById('b-rate').value)||0;
-  if(!start || !(mv>0)){ alert('\u8bf7\u586b\u5199\u8d77\u59cb\u65e5\u548c\u91d1\u989d'); return; }
-  // sym 用类型+期限自动生成（如 T-Note 3Y）
+  if(!start || !(mv>0)){ alert('请填写起始日和金额'); return; }
   const sym=btype+' '+term+'Y';
   const item={sym:sym, btype:btype, start:start, term:term, rate:rate, baseMv:Math.round(mv),
               mv:Math.round(mv), lastCompound:start, lastCoupon:start};
   item.mat=calcMaturity(start,term);
   if(editingBondIndex>=0){
-    // 编辑时保留已有的 lastCompound/lastCoupon 进度
     const old=DATA.bond.groups[0].holdings[editingBondIndex];
     item.lastCompound=old.lastCompound||start;
     item.lastCoupon=old.lastCoupon||start;
@@ -1191,24 +1377,24 @@ function saveBond(){
     const srcEl=document.getElementById('b-src');
     if(srcEl && srcEl.value){ deductSource(srcEl.value, item.baseMv); }
   }
-  rollAllBond();
+  rollAllBond(false);
   recompute();
-  openDetail('bond');
+  openDetail('bond', true);
 }
 function deleteBond(i){
   const item=DATA.bond.groups[0].holdings[i];
-  if(!confirm('\u5220\u9664 '+item.sym+' \uff1f')) return;
+  if(!item) return;
+  if(!confirm('删除 '+item.sym+' ？此操作不可撤销。')) return;
   DATA.bond.groups[0].holdings.splice(i,1);
+  editingBondIndex=-1;
   persistBond();
   recompute();
-  openDetail('bond');
+  openDetail('bond', true);
 }
 
-
-// ==================== 401k 编辑 ====================
+// ==================== 401k ====================
 function show401kForm(){
   const it=DATA.retire.groups[0].holdings.find(x=>x.growth);
-  // 在退休详情页底部插入表单
   let wrap=document.getElementById('k401Wrap');
   if(!wrap){
     wrap=document.createElement('div'); wrap.id='k401Wrap';
@@ -1216,17 +1402,17 @@ function show401kForm(){
   }
   wrap.innerHTML=
     '<div class="editform" style="border-color:var(--retire-ln)">'+
-      '<div class="fld"><label>\u5f53\u524d\u4f59\u989d ($) \u00b7 \u53ef\u6821\u51c6</label>'+
+      '<div class="fld"><label>当前余额 ($) · 可校准</label>'+
         '<input id="k-bal" type="number" inputmode="decimal" value="'+it.mv+'"></div>'+
-      '<div class="fld"><label>\u4e2a\u4eba\u6708\u7f34\u6b3e ($)</label>'+
+      '<div class="fld"><label>个人月缴款 ($)</label>'+
         '<input id="k-emp" type="number" inputmode="decimal" value="'+it.empCon+'"></div>'+
-      '<div class="fld"><label>\u96c7\u4e3b\u6708\u7f34\u6b3e ($)</label>'+
+      '<div class="fld"><label>雇主月缴款 ($)</label>'+
         '<input id="k-er" type="number" inputmode="decimal" value="'+it.erCon+'"></div>'+
-      '<div class="fld"><label>\u5e74\u5316\u56de\u62a5\u7387 (%)</label>'+
+      '<div class="fld"><label>年化回报率 (%)</label>'+
         '<input id="k-rate" type="number" inputmode="decimal" value="'+it.rate+'"></div>'+
       '<div class="btns">'+
-        '<button class="cancel" onclick="document.getElementById(\'k401Wrap\').innerHTML=\'\'">\u53d6\u6d88</button>'+
-        '<button class="save" style="background:var(--retire)" onclick="save401k()">\u4fdd\u5b58</button>'+
+        '<button class="cancel" onclick="document.getElementById(\'k401Wrap\').innerHTML=\'\'">取消</button>'+
+        '<button class="save" style="background:var(--retire)" onclick="save401k()">保存</button>'+
       '</div></div>';
   wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
@@ -1243,98 +1429,74 @@ function save401k(){
   persist401k();
   roll401k();
   recompute();
-  openDetail('retire');
+  openDetail('retire', true);
 }
 
-
-// ==================== 股票 增持/减持/改价/删除 ====================
+// ==================== 股票：增持 / 减持 / 改成本 / 删除 ====================
 let curStock={gi:-1,hi:-1};
-function stockItem(){ return DATA.stock.groups[curStock.gi].holdings[curStock.hi]; }
+function stockItem(){
+  const g=DATA.stock.groups[curStock.gi];
+  return g?g.holdings[curStock.hi]:null;
+}
 function showStockPanel(gi,hi){
-  // 关闭其他已打开的面板
   document.querySelectorAll('.stock-slot').forEach(function(s){ if(s.id!=='slot-'+gi+'-'+hi) s.innerHTML=''; });
   curStock={gi,hi};
   const it=DATA.stock.groups[gi].holdings[hi];
-  const mv=hmv(it), prof=(it.price-it.cost)/it.cost*100;
+  const prof=(it.cost>0)?((it.price-it.cost)/it.cost*100):0;
   const wrap=document.getElementById('slot-'+gi+'-'+hi);
   if(!wrap) return;
-  if(wrap.innerHTML){ wrap.innerHTML=''; return; } // 再次点击收起
+  if(wrap.innerHTML){ wrap.innerHTML=''; return; }
   wrap.innerHTML=
     '<div class="editform" style="border-color:var(--stock-ln)">'+
       '<div style="font-size:15px;font-weight:600;margin-bottom:4px">'+it.sym+'</div>'+
       '<div style="font-size:12px;color:var(--ink-2);margin-bottom:12px">'+
-        (it.shares%1?it.shares.toFixed(3):it.shares)+'\u80a1 \u00b7 \u5747\u6210\u672c $'+it.cost.toFixed(2)+
-        ' \u00b7 \u73b0\u4ef7 $'+it.price.toFixed(2)+' \u00b7 \u5229\u6da6 '+(prof>=0?'+':'')+prof.toFixed(1)+'%</div>'+
+        (it.shares%1?it.shares.toFixed(3):it.shares)+'股 · 均成本 $'+(it.cost||0).toFixed(2)+
+        ' · 现价 $'+(it.price||0).toFixed(2)+' · 利润 '+(prof>=0?'+':'')+prof.toFixed(1)+'%</div>'+
       '<div class="btns" style="margin-bottom:10px">'+
-        '<button class="save" style="background:var(--pos)" onclick="stockAction(\'buy\')">\u589e\u6301</button>'+
-        '<button class="save" style="background:var(--neg)" onclick="stockAction(\'sell\')">\u51cf\u6301</button>'+
+        '<button class="save" style="background:var(--pos)" onclick="stockAction(\'buy\')">增持</button>'+
+        '<button class="save" style="background:var(--neg)" onclick="stockAction(\'sell\')">减持</button>'+
       '</div>'+
       '<div class="btns">'+
-        '<button class="cancel" onclick="stockAction(\'price\')">\u6539\u73b0\u4ef7</button>'+
-        '<button class="cancel" onclick="closeStockPanel()">\u5173\u95ed</button>'+
+        '<button class="cancel" onclick="stockAction(\'price\')">改成本</button>'+
+        '<button class="cancel" onclick="closeStockPanel()">关闭</button>'+
       '</div>'+
       '<div id="stockActionWrap"></div>'+
+      '<div class="delrow"><button class="danger" style="width:100%;border-radius:10px;padding:12px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="deleteStock()">删除持仓（同时删 Sheet 行）</button></div>'+
     '</div>';
   wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
 function closeStockPanel(){ const w=document.getElementById('slot-'+curStock.gi+'-'+curStock.hi); if(w) w.innerHTML=''; }
 
-// ==================== 写回 Google Sheet ====================
-// 用 no-cors 发送：Apps Script 的 POST 会内部跳转，普通模式会被浏览器判为跨域失败。
-// no-cors 下请求照常送达 Sheet，只是拿不到回执（属正常，不代表失败）。
-function pushToSheet(payload){
-  return fetch(SHEET_API, {
-    method:'POST',
-    mode:'no-cors',
-    headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify(payload)
-  }).then(function(){
-    console.log('sheet write sent:', payload.action, payload.symbol||'');
-  }).catch(function(e){
-    console.log('sheet write failed', e);
-    alert('\u5df2\u5728\u672c\u5730\u66f4\u65b0\uff0c\u4f46\u540c\u6b65\u5230 Sheet \u5931\u8d25\uff08\u7f51\u7edc\u95ee\u9898\uff09');
-  });
-}
-function syncStockToSheet(it){
-  if(!it) return;
-  pushToSheet({action:'updateStock', symbol:it.sym,
-               shares:Number(it.shares.toFixed(4)), cost:Number(it.cost.toFixed(4))});
-}
-function syncCashToSheet(){
-  pushToSheet({action:'updateCash', amount:loadBrokerCash()});
-}
-
 function stockAction(kind){
   const it=stockItem();
   const w=document.getElementById('stockActionWrap');
   if(kind==='price'){
-    w.innerHTML='<div class="fld" style="margin-top:12px"><label>\u65b0\u6210\u672c\u4ef7 ($/\u80a1)</label>'+
-      '<input id="s-price" type="number" inputmode="decimal" value="'+it.cost.toFixed(2)+'"></div>'+
-      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">\u73b0\u4ef7\u7531 Sheet \u81ea\u52a8\u62c9\u53d6\uff0c\u6b64\u5904\u4ec5\u4fee\u6b63\u6210\u672c</div>'+
-      '<button class="save" style="background:var(--stock)" onclick="applyPrice()">\u786e\u8ba4</button>';
+    w.innerHTML='<div class="fld" style="margin-top:12px"><label>新成本价 ($/股)</label>'+
+      '<input id="s-price" type="number" inputmode="decimal" value="'+(it.cost||0).toFixed(2)+'"></div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">现价由 Sheet 的 GOOGLEFINANCE 拉取，此处仅修正成本</div>'+
+      '<button class="save" style="background:var(--stock)" onclick="applyPrice()">确认</button>';
     document.getElementById('s-price').focus();
     return;
   }
   const isBuy=kind==='buy';
-  w.innerHTML='<div class="fld" style="margin-top:12px"><label>'+(isBuy?'\u589e\u6301':'\u51cf\u6301')+'\u80a1\u6570</label>'+
-    '<input id="s-sh" type="number" inputmode="decimal" placeholder="\u4f8b\uff1a10"></div>'+
-    '<div class="fld"><label>'+(isBuy?'\u4e70\u5165':'\u5356\u51fa')+'\u4ef7 ($/\u80a1)</label>'+
+  w.innerHTML='<div class="fld" style="margin-top:12px"><label>'+(isBuy?'增持':'减持')+'股数</label>'+
+    '<input id="s-sh" type="number" inputmode="decimal" placeholder="例：10"></div>'+
+    '<div class="fld"><label>'+(isBuy?'买入':'卖出')+'价 ($/股)</label>'+
     '<input id="s-px" type="number" inputmode="decimal" value="'+it.price+'"></div>'+
-    '<button class="save" style="background:'+(isBuy?'var(--pos)':'var(--neg)')+'" onclick="'+(isBuy?'applyBuy':'applySell')+'()">\u786e\u8ba4'+(isBuy?'\u589e\u6301':'\u51cf\u6301')+'</button>';
+    '<button class="save" style="background:'+(isBuy?'var(--pos)':'var(--neg)')+'" onclick="'+(isBuy?'applyBuy':'applySell')+'()">确认'+(isBuy?'增持':'减持')+'</button>';
   document.getElementById('s-sh').focus();
 }
 function applyBuy(){
   const it=stockItem();
   const sh=parseFloat(document.getElementById('s-sh').value);
   const px=parseFloat(document.getElementById('s-px').value);
-  if(!(sh>0)||!(px>0)){ alert('\u8bf7\u8f93\u5165\u80a1\u6570\u548c\u4ef7\u683c'); return; }
-  // 加权平均成本
+  if(!(sh>0)||!(px>0)){ alert('请输入股数和价格'); return; }
   const newShares=it.shares+sh;
   it.cost=(it.shares*it.cost + sh*px)/newShares;
   it.shares=newShares;
-  it.price=px;  // 用最新成交价更新现价
-  // 从券商现金扣款
-  const bc=brokerCashItem(); if(bc){ bc.mv=Math.max(0,Math.round((bc.mv||0)-sh*px)); saveBrokerCash(bc.mv); }
+  it.price=px;
+  const bc=brokerCashItem();
+  if(bc){ bc.mv=Math.max(0,Math.round((bc.mv||0)-sh*px)); saveBrokerCash(bc.mv); }
   afterStockChange();
   syncStockToSheet(it);
   syncCashToSheet();
@@ -1343,20 +1505,18 @@ function applySell(){
   const it=stockItem();
   const sh=parseFloat(document.getElementById('s-sh').value);
   const px=parseFloat(document.getElementById('s-px').value);
-  if(!(sh>0)){ alert('\u8bf7\u8f93\u5165\u80a1\u6570'); return; }
-  const sym=it.sym;
+  if(!(sh>0)){ alert('请输入股数'); return; }
+  const sym=normSym(it.sym);
   const sellPx=(px>0?px:it.price);
-  const soldOut = (sh>=it.shares-1e-9);   // 减持等于全部持仓
-  // 卖出所得进券商现金
-  const bc=brokerCashItem(); if(bc){ bc.mv=Math.round((bc.mv||0)+sh*sellPx); saveBrokerCash(bc.mv); }
+  const soldOut = (sh>=it.shares-1e-9);
+  const bc=brokerCashItem();
+  if(bc){ bc.mv=Math.round((bc.mv||0)+sh*sellPx); saveBrokerCash(bc.mv); }
   if(soldOut){
-    // 清仓：本地删除整行 + Sheet 删除整行
-    const g=DATA.stock.groups[curStock.gi];
-    g.holdings.splice(curStock.hi,1);
+    DATA.stock.groups[curStock.gi].holdings.splice(curStock.hi,1);
     afterStockChange();
-    pushToSheet({action:'deleteStock', symbol:sym});
+    pushToSheet({action:'deleteStock', symbol:sym});   // 队列保证先删行、再写现金
   }else{
-    it.shares=it.shares-sh;   // 成本不变
+    it.shares=it.shares-sh;
     if(px>0) it.price=px;
     afterStockChange();
     syncStockToSheet(it);
@@ -1366,98 +1526,184 @@ function applySell(){
 function applyPrice(){
   const it=stockItem();
   const c=parseFloat(document.getElementById('s-price').value);
-  if(!(c>0)){ alert('\u8bf7\u8f93\u5165\u6709\u6548\u6210\u672c\u4ef7'); return; }
+  if(!(c>0)){ alert('请输入有效成本价'); return; }
   it.cost=c;
   afterStockChange();
   syncStockToSheet(it);
 }
+function deleteStock(){
+  const it=stockItem();
+  if(!it) return;
+  if(!confirm('删除 '+it.sym+' ？\n会同时删除 Google Sheet 里这一行，且不影响券商现金。')) return;
+  const sym=normSym(it.sym);
+  DATA.stock.groups[curStock.gi].holdings.splice(curStock.hi,1);
+  afterStockChange();
+  pushToSheet({action:'deleteStock', symbol:sym});
+}
 function afterStockChange(){
+  DATA.stock.groups = DATA.stock.groups.filter(function(g){ return g.holdings.length>0; });
   persistStock();
   recompute();
-  openDetail('stock');
+  openDetail('stock', true);
 }
-function deleteStock(gi,hi){
-  const it=DATA.stock.groups[gi].holdings[hi];
-  if(!confirm('\u5220\u9664 '+it.sym+' \uff1f')) return;
-  DATA.stock.groups[gi].holdings.splice(hi,1);
+
+// ==================== 券商现金（内联表单，不再用 prompt）====================
+function editBrokerCash(){
+  const bc=brokerCashItem();
+  const cur=bc?bc.mv:loadBrokerCash();
+  const w=document.getElementById('cashslot');
+  if(!w) return;
+  if(w.innerHTML){ w.innerHTML=''; return; }
+  w.innerHTML=
+    '<div class="editform" style="border-color:var(--stock-ln)">'+
+      '<div class="fld"><label>券商可用现金 ($)</label>'+
+        '<input id="bc-amt" type="number" inputmode="decimal" value="'+cur+'"></div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">保存后会写回 Sheet 的 Cash 行 E 列</div>'+
+      '<div class="btns">'+
+        '<button class="cancel" onclick="document.getElementById(\'cashslot\').innerHTML=\'\'">取消</button>'+
+        '<button class="save" style="background:var(--stock)" onclick="saveBrokerCashForm()">保存</button>'+
+      '</div></div>';
+  w.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function saveBrokerCashForm(){
+  const n=parseFloat(document.getElementById('bc-amt').value);
+  if(!(n>=0)){ alert('请输入有效金额'); return; }
+  saveBrokerCash(n);
+  const bc=brokerCashItem();
+  if(bc) bc.mv=Math.round(n);
   persistStock();
   recompute();
-  openDetail('stock');
+  openDetail('stock', true);
+  syncCashToSheet();
 }
 
+// ==================== 买入新股票 ====================
+function renderStockAdd(){
+  const wrap=document.getElementById('stockAddWrap');
+  if(!wrap) return;
+  wrap.innerHTML='<button class="save" style="background:var(--stock);width:100%;border:none;border-radius:14px;padding:14px;font-size:15px;font-weight:600;color:#fff;font-family:inherit;cursor:pointer;margin-top:4px" onclick="showBuyStockForm()">+ 买入新股票</button><div id="buyStockForm"></div>';
+}
+function showBuyStockForm(){
+  const selStyle='width:100%;padding:14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  document.getElementById('buyStockForm').innerHTML=
+    '<div class="editform" style="border-color:var(--stock-ln);margin-top:10px">'+
+      '<div class="fld"><label>股票代码 Symbol</label>'+
+        '<input id="bs-sym" type="text" placeholder="例：NVDA（ASMI 请填 ASMIY）" style="text-transform:uppercase"></div>'+
+      '<div class="fld"><label>成本价 ($)</label>'+
+        '<input id="bs-cost" type="number" inputmode="decimal" placeholder="例：150.00"></div>'+
+      '<div class="fld"><label>股数</label>'+
+        '<input id="bs-sh" type="number" inputmode="decimal" placeholder="例：10"></div>'+
+      '<div class="fld"><label>类别</label>'+
+        '<select id="bs-cat" style="'+selStyle+'">'+
+          STOCK_CATS.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('')+
+        '</select></div>'+
+      '<div class="btns">'+
+        '<button class="cancel" onclick="document.getElementById(\'buyStockForm\').innerHTML=\'\'">取消</button>'+
+        '<button class="save" style="background:var(--stock)" onclick="submitBuyStock()">买入</button>'+
+      '</div></div>';
+  document.getElementById('bs-sym').focus();
+}
+function submitBuyStock(){
+  const sym=normSym(document.getElementById('bs-sym').value);
+  const cost=parseFloat(document.getElementById('bs-cost').value);
+  const sh=parseFloat(document.getElementById('bs-sh').value);
+  const cat=document.getElementById('bs-cat').value;
+  if(!sym || !(cost>0) || !(sh>0)){ alert('请填写代码、成本价、股数'); return; }
+  let g=DATA.stock.groups.find(function(x){return x.cat===cat;});
+  if(!g){
+    const meta=GROUP_META.find(function(m){return m.cat===cat;})||{cat:cat, sub:'', semi:false};
+    g={cat:meta.cat, sub:meta.sub, semi:meta.semi, holdings:[]};
+    DATA.stock.groups.push(g);
+  }
+  let existing=g.holdings.find(function(x){return normSym(x.sym)===sym;});
+  if(existing){
+    const totSh=existing.shares+sh;
+    existing.cost=(existing.shares*existing.cost+sh*cost)/totSh;
+    existing.shares=totSh;
+  }else{
+    g.holdings.push({sym:sym, shares:sh, cost:cost, price:cost, desc:SYM_DESC[sym]||''});
+  }
+  const bc=brokerCashItem();
+  if(bc){ bc.mv=Math.max(0,Math.round((bc.mv||0)-sh*cost)); saveBrokerCash(bc.mv); }
+  persistStock();
+  recompute();
+  openDetail('stock', true);
+  const sheetCat=(STOCK_TAXONOMY.find(function(t){return t.cat===cat;})||{}).sheet||'Other ETF';
+  if(existing){ syncStockToSheet(existing); }
+  else{
+    pushToSheet({action:'addStock', symbol:sym, category:sheetCat,
+                 shares:Number(sh.toFixed(4)), cost:Number(cost.toFixed(4))});
+  }
+  syncCashToSheet();
+}
 
-// ==================== 现金 / HSA 简单编辑 ====================
+// ==================== HSA 简单编辑 ====================
 const SIMPLE_KEY={cash:'cashList_v1', hsa:'hsaList_v1'};
 let editingSimple={cls:null, idx:-1};
-// HSA "\u6dfb\u52a0\u8d26\u6237" \u5df2\u5220\u9664\uff08\u4e0d\u9700\u8981\uff09\uff0c\u4fdd\u7559\u7a7a\u5b9e\u73b0\u4ee5\u517c\u5bb9\u8c03\u7528\u5904
 function renderSimpleAdd(cls){
   const wrap=document.getElementById('simpleAddWrap');
   if(wrap) wrap.innerHTML='';
+  editingSimple={cls:null, idx:-1};
 }
-function simpleFormHtml(cls,vals){
+function simpleFormHtml(cls,vals,isEdit){
   vals=vals||{};
   return '<div class="editform" style="border-color:var(--'+cls+'-ln)">'+
-    '<div class="fld"><label>\u540d\u79f0</label>'+
-      '<input id="sm-name" value="'+(vals.sym||'')+'" placeholder="\u4f8b\uff1aChase / Investment" autocomplete="off"></div>'+
-    '<div class="fld"><label>\u91d1\u989d ($)</label>'+
-      '<input id="sm-mv" type="number" inputmode="decimal" value="'+(vals.mv!=null?vals.mv:'')+'" placeholder="\u4f8b\uff1a10000"></div>'+
-    '<div class="fld"><label>\u5907\u6ce8\uff08\u9009\u586b\uff09</label>'+
-      '<input id="sm-desc" value="'+(vals.desc||'')+'" placeholder="\u4f8b\uff1a\u65e5\u5e38\u64cd\u4f5c" autocomplete="off"></div>'+
+    '<div class="fld"><label>名称</label>'+
+      '<input id="sm-name" value="'+(vals.sym||'')+'" placeholder="例：Investment" autocomplete="off"></div>'+
+    '<div class="fld"><label>金额 ($)</label>'+
+      '<input id="sm-mv" type="number" inputmode="decimal" value="'+(vals.mv!=null?vals.mv:'')+'" placeholder="例：3458"></div>'+
+    '<div class="fld"><label>备注（选填）</label>'+
+      '<input id="sm-desc" value="'+(vals.desc||'')+'" autocomplete="off"></div>'+
     '<div class="btns">'+
-      '<button class="cancel" onclick="editingSimple={cls:null,idx:-1};renderSimpleAdd(\''+cls+'\')">\u53d6\u6d88</button>'+
-      '<button class="save" style="background:var(--'+cls+')" onclick="saveSimple(\''+cls+'\')">\u4fdd\u5b58</button>'+
-    '</div></div>';
-}
-function showSimpleForm(cls){
-  const wrap=document.getElementById('simpleAddWrap');
-  wrap.innerHTML=simpleFormHtml(cls);
-  document.getElementById('sm-name').focus();
+      '<button class="cancel" onclick="renderSimpleAdd(\''+cls+'\')">取消</button>'+
+      '<button class="save" style="background:var(--'+cls+')" onclick="saveSimple(\''+cls+'\')">保存</button>'+
+    '</div>'+
+    (isEdit?'<div class="delrow"><button class="danger" style="width:100%;border-radius:10px;padding:12px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="deleteSimple(\''+cls+'\','+editingSimple.idx+')">删除这一项</button></div>':'')+
+    '</div>';
 }
 function editSimple(cls,idx){
   editingSimple={cls,idx};
   const it=DATA[cls].groups[0].holdings[idx];
   const wrap=document.getElementById('simpleAddWrap');
-  wrap.innerHTML=simpleFormHtml(cls,{sym:it.sym, mv:(it.mv!=null?it.mv:hmv(it)), desc:it.desc});
+  wrap.innerHTML=simpleFormHtml(cls,{sym:it.sym, mv:(it.mv!=null?it.mv:hmv(it)), desc:it.desc}, true);
   wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
 function saveSimple(cls){
   const name=document.getElementById('sm-name').value.trim();
   const mv=parseFloat(document.getElementById('sm-mv').value);
   const desc=document.getElementById('sm-desc').value.trim();
-  if(!name || !(mv>=0)){ alert('\u8bf7\u586b\u5199\u540d\u79f0\u548c\u91d1\u989d'); return; }
+  if(!name || !(mv>=0)){ alert('请填写名称和金额'); return; }
   const item={sym:name, mv:Math.round(mv), desc:desc, noprice:true, qty:''};
   if(editingSimple.cls===cls && editingSimple.idx>=0){
-    DATA[cls].groups[0].holdings[editingSimple.idx]=item; editingSimple={cls:null,idx:-1};
+    DATA[cls].groups[0].holdings[editingSimple.idx]=item;
   }else{
     DATA[cls].groups[0].holdings.push(item);
   }
+  editingSimple={cls:null,idx:-1};
   persistSimple(cls, SIMPLE_KEY[cls]);
   recompute();
-  openDetail(cls);
+  openDetail(cls, true);
 }
 function deleteSimple(cls,idx){
   const it=DATA[cls].groups[0].holdings[idx];
-  if(!confirm('\u5220\u9664 '+it.sym+' \uff1f')) return;
+  if(!it) return;
+  if(!confirm('删除 '+it.sym+' ？')) return;
   DATA[cls].groups[0].holdings.splice(idx,1);
+  editingSimple={cls:null,idx:-1};
   persistSimple(cls, SIMPLE_KEY[cls]);
   recompute();
-  openDetail(cls);
+  openDetail(cls, true);
 }
 
-
-// ==================== 转账系统 · 账户定位 ====================
-// 券商现金：股票栏里 noprice 且 sym==='现金' 的条目
+// ==================== 账户定位 ====================
 function brokerCashItem(){
   for(const g of DATA.stock.groups){
-    for(const hh of g.holdings){ if(hh.noprice && hh.sym==='\u73b0\u91d1') return hh; }
+    for(const hh of g.holdings){ if(hh.noprice && hh.sym==='现金') return hh; }
   }
   return null;
 }
-// Chase：现金栏
 function chaseItem(){ return DATA.cash.groups[0].holdings.find(x=>x.sym==='Chase'); }
-// Marcus OS-9250：储蓄栏
 function marcusItem(){ return DATA.cd.groups[0].holdings.find(x=>x.sym==='OS-9250'); }
-
 function getSource(key){ return key==='chase'?chaseItem():key==='marcus'?marcusItem():null; }
 function sourceBalance(key){
   const it=getSource(key);
@@ -1468,20 +1714,24 @@ function deductSource(key, amt){
   const it=getSource(key); if(!it) return;
   if(it.baseMv!=null){ it.baseMv=Math.max(0,Math.round(it.baseMv-amt)); it.updated=new Date().toISOString().slice(0,10); }
   else{ it.mv=Math.max(0,Math.round((it.mv||0)-amt)); }
-  // persist对应类别
   if(key==='chase'){ persistSimple('cash','cashList_v1'); }
   if(key==='marcus'){ persistCd(); }
 }
 function addToTarget(key, amt){
   if(key==='broker'){
-    const bc=brokerCashItem(); if(bc){ bc.mv=Math.round((bc.mv||0)+amt); saveBrokerCash(bc.mv); persistStock(); }
+    const bc=brokerCashItem();
+    const cur = bc? (bc.mv||0) : loadBrokerCash();
+    const next = Math.round(cur+amt);
+    if(bc) bc.mv=next;
+    saveBrokerCash(next);
+    persistStock();
+    syncCashToSheet();          // ★ 关键修复：写回 Sheet，否则下次同步会被覆盖
   }else if(key==='mortgage'){
     PROPERTY.loan=Math.max(0, Math.round((PROPERTY.loan!=null?PROPERTY.loan:amortizeNow())-amt));
     PROPERTY.updated=new Date().toISOString().slice(0,10);
     persistProp();
   }
 }
-// 执行一次转账
 function doTransfer(srcKey, tgtKey, amt){
   if(!(amt>0)) return;
   deductSource(srcKey, amt);
@@ -1493,7 +1743,6 @@ function loadRecurring(){
   try{ return JSON.parse(localStorage.getItem('recurringTransfers_v1')||'[]'); }catch(e){ return []; }
 }
 function saveRecurring(list){ localStorage.setItem('recurringTransfers_v1', JSON.stringify(list)); }
-// 打开时补执行：对每条定期转账，从 lastRun 到本月，缺几次补几次
 function runRecurring(){
   const list=loadRecurring();
   const now=new Date(); const ym=now.getFullYear()*12+now.getMonth();
@@ -1509,179 +1758,287 @@ function runRecurring(){
   if(changed) saveRecurring(list);
 }
 
-
-// ==================== 转账页面 ====================
+// ==================== 转账页 ====================
 const SRC_OPTS=[{k:'chase',n:'Checking - Chase'},{k:'marcus',n:'Marcus OS-9250'}];
-const TGT_OPTS=[{k:'broker',n:'\u80a1\u7968\u8d26\u6237\u73b0\u91d1'},{k:'mortgage',n:'\u623f\u8d37\uff08\u8fd8\u6b3e\uff09'}];
+const TGT_OPTS=[{k:'broker',n:'股票账户现金'},{k:'mortgage',n:'房贷（还款）'}];
 function optName(list,k){ const o=list.find(x=>x.k===k); return o?o.n:k; }
-
-function openTransfer(){
-  renderTransfer();
-  go('transfer');
-}
+function openTransfer(){ renderTransfer(); go('transfer'); }
 function renderTransfer(){
   const body=document.getElementById('transfer-body');
   const chase=sourceBalance('chase'), marcus=sourceBalance('marcus');
   const rec=loadRecurring();
   let html=
-    // 余额速览
     '<div class="dhero dark" style="border-color:var(--cash)">'+
-      '<div class="l" style="color:var(--cash)">\u53ef\u8f6c\u51fa\u4f59\u989d</div>'+
+      '<div class="l" style="color:var(--cash)">可转出余额</div>'+
       '<div style="display:flex;gap:20px;margin-top:6px">'+
         '<div><div style="font-size:22px;font-weight:600" class="num">$'+fmt(chase)+'</div><div style="font-size:11px;color:var(--ink-faint)">Chase</div></div>'+
         '<div><div style="font-size:22px;font-weight:600" class="num">$'+fmt(marcus)+'</div><div style="font-size:11px;color:var(--ink-faint)">Marcus OS</div></div>'+
       '</div></div>'+
-    // 一次性转账
-    '<div class="group"><div class="grp-head"><div class="cat">\u4e00\u6b21\u6027\u8f6c\u8d26</div></div>'+
+    '<div class="group"><div class="grp-head"><div class="cat">一次性转账</div></div>'+
       '<div style="padding:14px">'+
         transferFormFields('o')+
-        '<button style="background:var(--cash);color:#fff;width:100%;margin-top:6px;border:none;border-radius:14px;padding:15px;font-size:16px;font-weight:600;font-family:inherit;cursor:pointer;box-shadow:0 2px 8px rgba(26,157,74,.25)" onclick="submitOneTime()">\u786e\u8ba4\u8f6c\u8d26</button>'+
+        '<button style="background:var(--cash);color:#fff;width:100%;margin-top:6px;border:none;border-radius:14px;padding:15px;font-size:16px;font-weight:600;font-family:inherit;cursor:pointer" onclick="submitOneTime()">确认转账</button>'+
       '</div></div>'+
-    // 定期转账设置
-    '<div class="group"><div class="grp-head"><div class="cat">\u8bbe\u7f6e\u5b9a\u671f\u8f6c\u8d26<span class="sub">\u6bcf\u6708\u81ea\u52a8\u6267\u884c</span></div></div>'+
+    '<div class="group"><div class="grp-head"><div class="cat">设置定期转账<span class="sub">每月自动执行</span></div></div>'+
       '<div style="padding:14px">'+
         transferFormFields('r')+
-        '<button style="background:var(--retire);color:#fff;width:100%;margin-top:6px;border:none;border-radius:14px;padding:15px;font-size:16px;font-weight:600;font-family:inherit;cursor:pointer;box-shadow:0 2px 8px rgba(13,148,136,.25)" onclick="submitRecurring()">\u4fdd\u5b58\u5b9a\u671f\u8f6c\u8d26</button>'+
+        '<button style="background:var(--retire);color:#fff;width:100%;margin-top:6px;border:none;border-radius:14px;padding:15px;font-size:16px;font-weight:600;font-family:inherit;cursor:pointer" onclick="submitRecurring()">保存定期转账</button>'+
       '</div></div>';
-  // 已设置的定期转账列表
   if(rec.length){
-    html+='<div class="group"><div class="grp-head"><div class="cat">\u5df2\u8bbe\u7f6e\u7684\u5b9a\u671f\u8f6c\u8d26</div></div>'+
+    html+='<div class="group"><div class="grp-head"><div class="cat">已设置的定期转账</div></div>'+
       rec.map(function(r,i){
         return '<div class="row"><div class="tk" style="width:auto;flex:1">'+
-          '<div class="sym" style="font-size:13px">'+optName(SRC_OPTS,r.src)+' \u2192 '+optName(TGT_OPTS,r.tgt)+'</div>'+
-          '<div class="qty">\u6bcf\u6708 $'+fmt(r.amt)+'</div></div>'+
-          '<div class="val"><button class="cancel" style="padding:6px 12px;font-size:12px" onclick="delRecurring('+i+')">\u5220\u9664</button></div></div>';
+          '<div class="sym" style="font-size:13px">'+optName(SRC_OPTS,r.src)+' → '+optName(TGT_OPTS,r.tgt)+'</div>'+
+          '<div class="qty">每月 $'+fmt(r.amt)+'</div></div>'+
+          '<div class="val"><button class="cancel" style="padding:6px 12px;font-size:12px;border:none;border-radius:8px;background:#fdecec;color:var(--neg);font-family:inherit;font-weight:600;cursor:pointer" onclick="delRecurring('+i+')">删除</button></div></div>';
       }).join('')+'</div>';
   }
   body.innerHTML=html;
 }
 function transferFormFields(p){
+  const st='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
   return '<div class="fld"><label>From</label>'+
-      '<select id="'+p+'-src" style="width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit">'+
-        SRC_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
+      '<select id="'+p+'-src" style="'+st+'">'+SRC_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
     '<div class="fld"><label>To</label>'+
-      '<select id="'+p+'-tgt" style="width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit">'+
-        TGT_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
-    '<div class="fld"><label>\u91d1\u989d ($)</label>'+
-      '<input id="'+p+'-amt" type="number" inputmode="decimal" placeholder="\u4f8b\uff1a500" style="width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit;-webkit-appearance:none"></div>';
+      '<select id="'+p+'-tgt" style="'+st+'">'+TGT_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
+    '<div class="fld"><label>金额 ($)</label>'+
+      '<input id="'+p+'-amt" type="number" inputmode="decimal" placeholder="例：500" style="'+st+';-webkit-appearance:none"></div>';
 }
 function submitOneTime(){
   const src=document.getElementById('o-src').value;
   const tgt=document.getElementById('o-tgt').value;
   const amt=parseFloat(document.getElementById('o-amt').value);
-  if(!(amt>0)){ alert('\u8bf7\u8f93\u5165\u91d1\u989d'); return; }
+  if(!(amt>0)){ alert('请输入金额'); return; }
+  if(tgt==='broker' && !syncOk){
+    if(!confirm('当前与 Google Sheet 同步失败。\n此时转入券商现金可能在下次同步时被覆盖。\n仍要继续吗？')) return;
+  }
   doTransfer(src,tgt,amt);
   recompute();
   renderTransfer();
-  alert('\u5df2\u8f6c\u8d26 $'+fmt(amt)+'\uff1a'+optName(SRC_OPTS,src)+' \u2192 '+optName(TGT_OPTS,tgt));
+  alert('已转账 $'+fmt(amt)+'：'+optName(SRC_OPTS,src)+' → '+optName(TGT_OPTS,tgt));
 }
 function submitRecurring(){
   const src=document.getElementById('r-src').value;
   const tgt=document.getElementById('r-tgt').value;
   const amt=parseFloat(document.getElementById('r-amt').value);
-  if(!(amt>0)){ alert('\u8bf7\u8f93\u5165\u91d1\u989d'); return; }
+  if(!(amt>0)){ alert('请输入金额'); return; }
   const list=loadRecurring();
   const now=new Date();
   list.push({src,tgt,amt:Math.round(amt), startYm:now.getFullYear()*12+now.getMonth(), lastRun:now.getFullYear()*12+now.getMonth()});
   saveRecurring(list);
   renderTransfer();
-  alert('\u5b9a\u671f\u8f6c\u8d26\u5df2\u8bbe\u7f6e\uff1a\u6bcf\u6708 $'+fmt(amt));
+  alert('定期转账已设置：每月 $'+fmt(amt)+'（从下个月开始自动执行）');
 }
 function delRecurring(i){
   const list=loadRecurring(); list.splice(i,1); saveRecurring(list); renderTransfer();
 }
 
-
-// ==================== 收入 UI（现金栏）====================
+// ==================== 现金页：收入 / 支出 ====================
 function monthLabel(){
   const d=new Date();
   const mons=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return mons[d.getMonth()]+' '+d.getFullYear();
 }
-let cashTab='in';  // 'in' 收入 / 'ex' 支出
+let cashTab='in';
 function renderIncome(){
   const wrap=document.getElementById('incomeWrap');
   if(!wrap) return;
   wrap.innerHTML=
     '<div class="cashtabs">'+
-      '<div class="cashtab '+(cashTab==='in'?'on-in':'')+'" onclick="switchCashTab(\'in\')">\u6536\u5165</div>'+
-      '<div class="cashtab '+(cashTab==='ex'?'on-ex':'')+'" onclick="switchCashTab(\'ex\')">\u652f\u51fa</div>'+
+      '<div class="cashtab '+(cashTab==='in'?'on-in':'')+'" onclick="switchCashTab(\'in\')">收入</div>'+
+      '<div class="cashtab '+(cashTab==='ex'?'on-ex':'')+'" onclick="switchCashTab(\'ex\')">支出</div>'+
     '</div>'+
     '<div style="margin:2px 2px 10px;font-size:12px;color:var(--ink-faint);font-weight:600">'+monthLabel()+'</div>'+
     '<div id="cashTabBody"></div>';
   renderCashTabBody();
 }
-function switchCashTab(t){ cashTab=t; renderIncome(); }
+function switchCashTab(t){ cashTab=t; expenseDrill=null; editingLedgerRow=null; renderIncome(); }
 function renderCashTabBody(){
   const body=document.getElementById('cashTabBody');
   if(!body) return;
   if(cashTab==='in'){
     const cfg=loadIncome(); const p=cfg.payroll;
-    const freqLabel={weekly:'\u6bcf\u5468',biweekly:'\u6bcf\u4e24\u5468',monthly:'\u6bcf\u6708'};
-    const payrollLine = p&&p.amount ? ('\u5df2\u8bbe\uff1a'+(freqLabel[p.freq]||'\u6bcf\u4e24\u5468')+' $'+fmt(p.amount)) : '\u672a\u8bbe\u7f6e';
+    const freqLabel={weekly:'每周',biweekly:'每两周',monthly:'每月'};
+    const payrollLine = p&&p.amount ? ('已设：'+(freqLabel[p.freq]||'每两周')+' $'+fmt(p.amount)) : '未设置';
     body.innerHTML=
       '<div class="group" style="background:#ECEEE1;border:none">'+
         '<div class="row" style="border-color:rgba(0,0,0,.05);cursor:pointer" onclick="showPayrollForm()">'+
           '<div class="tk" style="width:auto;flex:1"><div class="sym" style="color:#4F5D7A">Payroll</div>'+
             '<div class="qty" style="color:#4F5D7A">'+payrollLine+'</div></div>'+
-          '<div class="val"><div class="pc" style="color:#4F5D7A">\u8bbe\u7f6e</div></div></div>'+
+          '<div class="val"><div class="pc" style="color:#4F5D7A">设置</div></div></div>'+
         '<div class="row" style="border-color:rgba(0,0,0,.05);cursor:pointer" onclick="showBonusForm()">'+
           '<div class="tk" style="width:auto;flex:1"><div class="sym" style="color:#4F5D7A">Bonus</div>'+
-            '<div class="qty" style="color:#4F5D7A">\u4e00\u6b21\u6027\u624b\u52a8</div></div>'+
-          '<div class="val"><div class="pc" style="color:#4F5D7A">+ \u6dfb\u52a0</div></div></div>'+
+            '<div class="qty" style="color:#4F5D7A">一次性手动</div></div>'+
+          '<div class="val"><div class="pc" style="color:#4F5D7A">+ 添加</div></div></div>'+
       '</div>'+
       '<div id="incomeFormWrap"></div>'+
-      '<button style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:14px;background:var(--card);color:var(--ink-2);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="showChaseCashForm()">\u624b\u52a8\u4fee\u6539\u73b0\u91d1\u4f59\u989d</button>';
+      '<button style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:14px;background:var(--card);color:var(--ink-2);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="showChaseCashForm()">手动修改现金余额</button>';
+  }else if(expenseDrill){
+    renderExpenseDrill(body);
   }else{
-    // 支出方块网格
-    const expCats=['Bill & utilities','Shopping','Travel','Grocery','Dining','Auto & Gas','Entertainment','Health & Beauty','Home','Other'];
-    const expColors={
-      'Bill & utilities':'#e8f0fe','Shopping':'#f3e9fd','Travel':'#e3f6ea',
-      'Grocery':'#fbf1d9','Dining':'#fce7f1','Auto & Gas':'#EFEDDA',
-      'Entertainment':'#fdecec','Health & Beauty':'#FFF8F2','Home':'#E6DDF6','Other':'#DCDDE3'
-    };
-    // 从 Sheet 的 Ledger 读到的当月支出；类别匹配忽略大小写和空格
-    const amounts={}; expCats.forEach(function(c){ amounts[c]=0; });
+    const amounts={}; EXP_CATS.forEach(function(c){ amounts[c]=0; });
+    let unmatchedTotal=0; const unmatchedNames=[];
     Object.keys(monthExpense||{}).forEach(function(k){
-      const key=k.trim().toLowerCase();
-      const hit=expCats.find(function(c){ return c.toLowerCase()===key; });
-      amounts[hit||'Other'] += (parseFloat(monthExpense[k])||0);
+      const hit=matchCat(k);
+      const v=parseFloat(monthExpense[k])||0;
+      if(hit){ amounts[hit]+=v; }
+      else{ unmatchedTotal+=v; if(unmatchedNames.indexOf(k)<0) unmatchedNames.push(k); }
     });
-    const total=expCats.reduce(function(s,c){ return s+amounts[c]; },0);
+    const total=EXP_CATS.reduce(function(s,c){ return s+amounts[c]; },0)+unmatchedTotal;
     body.innerHTML=
       '<div class="expgrid">'+
-        expCats.map(function(c){
+        EXP_CATS.map(function(c){
           const a=amounts[c]; const pc=total>0?(a/total*100).toFixed(0):'0';
-          return '<div class="expcell" style="background:'+expColors[c]+'"><div class="nm">'+c+'</div>'+
-            '<div class="amt">$'+fmt(a)+'</div>'+
-            '<div class="pc">\u5360\u6bd4 '+pc+'%</div></div>';
+          return '<div class="expcell" style="background:'+EXP_COLORS[c]+';cursor:pointer" onclick="openExpenseDrill(\''+c.replace(/'/g,"\\'")+'\')">'+
+            '<div class="nm">'+c+'</div>'+
+            '<div class="amt">$'+fmt(a)+'</div><div class="pc">占比 '+pc+'%</div></div>';
         }).join('')+
-        '<div class="expcell exptotal"><div class="nm">\u672c\u6708\u5408\u8ba1</div>'+
-          '<div class="amt">$'+fmt(total)+'</div>'+
-          '<div class="pc">'+expCats.length+' \u7c7b\u5408\u8ba1</div></div>'+
-      '</div>';
+        '<div class="expcell exptotal"><div class="nm">本月合计</div>'+
+          '<div class="amt">$'+fmt(total)+'</div></div>'+
+      '</div>'+
+      (unmatchedTotal>0
+        ? '<div style="margin-top:10px;padding:11px 13px;background:#fdecec;border-radius:12px;font-size:12px;color:#B86A78;line-height:1.5">'+
+            '⚠️ Ledger 中有 $'+fmt(unmatchedTotal)+' 的支出分类不匹配：'+unmatchedNames.join('、')+
+            '<br>已计入合计，但未归入任何方块。点下面「补记/订正」可以直接改。</div>'
+        : '')+
+      '<button style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:14px;background:var(--card);color:var(--ink-2);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="openExpenseDrill(\'__ALL__\')">全部明细 / 订正</button>';
   }
 }
+
+// ==================== 支出明细：改 / 删 / 补记 ====================
+let expenseDrill=null;      // null=方块视图；分类名或 '__ALL__'=明细视图
+let editingLedgerRow=null;
+function openExpenseDrill(cat){ expenseDrill=cat; editingLedgerRow=null; renderCashTabBody(); }
+function closeExpenseDrill(){ expenseDrill=null; editingLedgerRow=null; renderCashTabBody(); }
+
+function drillRows(){
+  const ym=curYm();
+  return ledgerRows.filter(function(r){
+    if((r.date||'').slice(0,7)!==ym) return false;
+    if(expenseDrill==='__ALL__') return true;
+    return matchCat(r.category)===expenseDrill;
+  }).sort(function(a,b){ return (a.date<b.date?1:a.date>b.date?-1:b.row-a.row); });
+}
+
+function renderExpenseDrill(body){
+  const rows=drillRows();
+  const sum=rows.reduce(function(s,r){ return s+(parseFloat(r.amount)||0); },0);
+  const title=(expenseDrill==='__ALL__')?'本月全部支出':expenseDrill;
+  let html=
+    '<div style="display:flex;align-items:center;gap:10px;margin:2px 2px 12px">'+
+      '<button style="background:none;border:none;font-size:15px;font-weight:600;color:var(--cash);font-family:inherit;cursor:pointer;padding:4px 6px 4px 0" onclick="closeExpenseDrill()">&lsaquo; 支出</button>'+
+      '<div style="flex:1;font-size:14px;font-weight:600">'+title+'</div>'+
+      '<div class="num" style="font-size:15px;font-weight:600">$'+fmt(sum)+'</div>'+
+    '</div>';
+  if(!rows.length){
+    html+='<div class="placeholder">本月这一类还没有记录</div>';
+  }else{
+    html+='<div class="group">'+rows.map(function(r){
+      const isFix=!!(r.key||'');
+      return '<div class="row" style="cursor:pointer" onclick="editLedger('+r.row+')">'+
+        '<div class="tk" style="width:auto;flex:1">'+
+          '<div class="sym" style="font-size:13px">'+(r.note||r.category)+(isFix?' · 固定':'')+'</div>'+
+          '<div class="qty">'+(r.date||'').replace(/-/g,'/')+(expenseDrill==='__ALL__'?(' · '+r.category):'')+'</div>'+
+        '</div>'+
+        '<div class="val"><div class="mv">$'+(parseFloat(r.amount)||0).toFixed(2)+'</div></div></div>'+
+      '<div class="stock-slot" id="lg-'+r.row+'"></div>';
+    }).join('')+'</div>';
+  }
+  html+='<button style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:14px;background:var(--card);color:var(--ink-2);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="showAddLedger()">+ 补记一笔</button><div id="addLedgerWrap"></div>';
+  if(FIXED_CATS.indexOf(expenseDrill)>=0){ html+=renderFixedSection(expenseDrill); }
+  body.innerHTML=html;
+}
+
+function ledgerFormHtml(v, isEdit){
+  v=v||{};
+  const st='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  const cat=matchCat(v.category)||v.category||(expenseDrill&&expenseDrill!=='__ALL__'?expenseDrill:EXP_CATS[0]);
+  let opts=EXP_CATS.map(function(c){ return '<option value="'+c+'"'+(cat===c?' selected':'')+'>'+c+'</option>'; }).join('');
+  if(!matchCat(cat)){ opts='<option value="'+cat+'" selected>'+cat+'（不匹配，请改正）</option>'+opts; }
+  return '<div class="editform" style="border-color:var(--cash-ln)">'+
+    '<div class="fld"><label>日期</label><input id="lg-date" type="date" value="'+(v.date||new Date().toISOString().slice(0,10))+'"></div>'+
+    '<div class="fld"><label>分类</label><select id="lg-cat" style="'+st+'">'+opts+'</select></div>'+
+    '<div class="fld"><label>金额 ($)</label><input id="lg-amt" type="number" inputmode="decimal" value="'+(v.amount!=null?v.amount:'')+'" placeholder="例：42.50"></div>'+
+    '<div class="fld"><label>备注（选填）</label><input id="lg-note" value="'+(v.note||'').replace(/"/g,'&quot;')+'" placeholder="例：Costco 大采购" autocomplete="off"></div>'+
+    '<div class="btns">'+
+      '<button class="cancel" onclick="cancelLedgerForm()">取消</button>'+
+      '<button class="save" style="background:var(--cash)" onclick="'+(isEdit?'saveLedgerEdit('+v.row+','+(v.amount||0)+')':'saveLedgerAdd()')+'">保存</button>'+
+    '</div>'+
+    (isEdit?'<div class="delrow"><button class="danger" style="width:100%;border-radius:10px;padding:12px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="deleteLedgerRow('+v.row+','+(v.amount||0)+')">删除这笔</button></div>':'')+
+  '</div>';
+}
+function cancelLedgerForm(){ editingLedgerRow=null; renderCashTabBody(); }
+function editLedger(row){
+  const r=ledgerRows.find(function(x){ return x.row===row; });
+  if(!r) return;
+  if(editingLedgerRow===row){ editingLedgerRow=null; renderCashTabBody(); return; }
+  editingLedgerRow=row;
+  renderCashTabBody();
+  const w=document.getElementById('lg-'+row);
+  if(w){ w.innerHTML=ledgerFormHtml(r, true); w.scrollIntoView({behavior:'smooth',block:'center'}); }
+}
+function showAddLedger(){
+  const w=document.getElementById('addLedgerWrap');
+  if(!w) return;
+  if(w.innerHTML){ w.innerHTML=''; return; }
+  w.innerHTML=ledgerFormHtml({}, false);
+  w.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function readLedgerForm(){
+  return {
+    date:document.getElementById('lg-date').value,
+    category:document.getElementById('lg-cat').value,
+    amount:parseFloat(document.getElementById('lg-amt').value),
+    note:document.getElementById('lg-note').value.trim()
+  };
+}
+function saveLedgerAdd(){
+  const v=readLedgerForm();
+  if(!v.date || !(v.amount>0)){ alert('请填写日期和金额'); return; }
+  apiWrite({action:'addLedger', date:v.date, category:v.category, amount:v.amount, note:v.note})
+    .then(function(res){
+      if(res && res.status==='success'){ editingLedgerRow=null; return reloadLedger(); }
+      alert('写入失败：'+((res&&res.message)||'未知原因'));
+    });
+}
+function saveLedgerEdit(row, expectAmount){
+  const v=readLedgerForm();
+  if(!v.date || !(v.amount>0)){ alert('请填写日期和金额'); return; }
+  apiWrite({action:'updateLedger', row:row, expectAmount:expectAmount,
+            date:v.date, category:v.category, amount:v.amount, note:v.note})
+    .then(function(res){
+      if(res && res.status==='success'){ editingLedgerRow=null; return reloadLedger(); }
+      alert('修改失败：'+((res&&res.message)||'未知原因'));
+    });
+}
+function deleteLedgerRow(row, expectAmount){
+  if(!confirm('删除这笔支出？金额会自动加回 Chase。')) return;
+  apiWrite({action:'deleteLedger', row:row, expectAmount:expectAmount})
+    .then(function(res){
+      if(res && res.status==='success'){ editingLedgerRow=null; return reloadLedger(); }
+      alert('删除失败：'+((res&&res.message)||'未知原因'));
+    });
+}
+
 function showPayrollForm(){
   const cfg=loadIncome(); const p=cfg.payroll||{};
   const freq=p.freq||'biweekly';
   const selStyle='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
   function fOpt(v,label){ return '<option value="'+v+'"'+(freq===v?' selected':'')+'>'+label+'</option>'; }
-  const wrap=document.getElementById('incomeFormWrap');
-  wrap.innerHTML=
+  document.getElementById('incomeFormWrap').innerHTML=
     '<div class="editform" style="border-color:var(--cash-ln)">'+
-      '<div class="fld"><label>\u6bcf\u671f\u91d1\u989d ($) \u00b7 \u7a0e\u540e\u5b9e\u53d1</label>'+
-        '<input id="pay-amt" type="number" inputmode="decimal" value="'+(p.amount||'')+'" placeholder="\u4f8b\uff1a2500"></div>'+
-      '<div class="fld"><label>\u53d1\u85aa\u9891\u7387</label>'+
+      '<div class="fld"><label>每期金额 ($) · 税后实发</label>'+
+        '<input id="pay-amt" type="number" inputmode="decimal" value="'+(p.amount||'')+'" placeholder="例：2500"></div>'+
+      '<div class="fld"><label>发薪频率</label>'+
         '<select id="pay-freq" style="'+selStyle+'">'+
-          fOpt('weekly','\u6bcf\u5468')+fOpt('biweekly','\u6bcf\u4e24\u5468')+fOpt('monthly','\u6bcf\u6708')+
+          fOpt('weekly','每周')+fOpt('biweekly','每两周')+fOpt('monthly','每月')+
         '</select></div>'+
-      '<div class="fld"><label>\u4e0b\u4e00\u6b21/\u8d77\u59cb\u53d1\u85aa\u65e5</label>'+
+      '<div class="fld"><label>起始发薪日</label>'+
         '<input id="pay-start" type="date" value="'+(p.start||'')+'"></div>'+
-      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:10px">\u8bbe\u7f6e\u540e\u6309\u9891\u7387\u81ea\u52a8\u5165\u8d26 Chase</div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:10px">保存后会从起始日按频率一次性补发到 Chase。若余额已经包含这些工资，请把起始日设为最近一次发薪日之后。</div>'+
       '<div class="btns">'+
-        '<button class="cancel" onclick="document.getElementById(\'incomeFormWrap\').innerHTML=\'\'">\u53d6\u6d88</button>'+
-        '<button class="save" style="background:var(--cash)" onclick="savePayroll()">\u4fdd\u5b58</button>'+
+        '<button class="cancel" onclick="document.getElementById(\'incomeFormWrap\').innerHTML=\'\'">取消</button>'+
+        '<button class="save" style="background:var(--cash)" onclick="savePayroll()">保存</button>'+
       '</div></div>';
   document.getElementById('pay-amt').focus();
 }
@@ -1689,167 +2046,84 @@ function savePayroll(){
   const amt=parseFloat(document.getElementById('pay-amt').value);
   const start=document.getElementById('pay-start').value;
   const freq=document.getElementById('pay-freq').value;
-  if(!(amt>0)||!start){ alert('\u8bf7\u586b\u5199\u91d1\u989d\u548c\u65e5\u671f'); return; }
+  if(!(amt>0)||!start){ alert('请填写金额和日期'); return; }
   const cfg=loadIncome();
   cfg.payroll={amount:Math.round(amt), start:start, freq:freq};
-  cfg.lastPayDate=null; // 重新从start结算
+  cfg.lastPayDate=null;
   saveIncome(cfg);
   runPayroll();
   recompute();
-  openDetail('cash');
+  openDetail('cash', true);
 }
 function showBonusForm(){
-  const wrap=document.getElementById('incomeFormWrap');
-  wrap.innerHTML=
+  document.getElementById('incomeFormWrap').innerHTML=
     '<div class="editform" style="border-color:var(--cash-ln)">'+
-      '<div class="fld"><label>Bonus \u91d1\u989d ($)</label>'+
-        '<input id="bonus-amt" type="number" inputmode="decimal" placeholder="\u4f8b\uff1a5000"></div>'+
+      '<div class="fld"><label>Bonus 金额 ($)</label>'+
+        '<input id="bonus-amt" type="number" inputmode="decimal" placeholder="例：5000"></div>'+
       '<div class="btns">'+
-        '<button class="cancel" onclick="document.getElementById(\'incomeFormWrap\').innerHTML=\'\'">\u53d6\u6d88</button>'+
-        '<button class="save" style="background:var(--cash)" onclick="saveBonus()">\u5165\u8d26</button>'+
+        '<button class="cancel" onclick="document.getElementById(\'incomeFormWrap\').innerHTML=\'\'">取消</button>'+
+        '<button class="save" style="background:var(--cash)" onclick="saveBonus()">入账</button>'+
       '</div></div>';
   document.getElementById('bonus-amt').focus();
 }
 function saveBonus(){
   const amt=parseFloat(document.getElementById('bonus-amt').value);
-  if(!(amt>0)){ alert('\u8bf7\u8f93\u5165\u91d1\u989d'); return; }
+  if(!(amt>0)){ alert('请输入金额'); return; }
   addToChase(Math.round(amt));
   recompute();
-  openDetail('cash');
-  alert('\u5df2\u5165\u8d26 Bonus $'+fmt(amt));
+  openDetail('cash', true);
+  alert('已入账 Bonus $'+fmt(amt));
 }
-
-
-function editBrokerCash(){
-  const bc=brokerCashItem();
-  const cur=bc?bc.mv:loadBrokerCash();
-  const v=prompt('\u5238\u5546\u53ef\u7528\u73b0\u91d1 ($)', cur);
-  if(v===null) return;
-  const n=parseFloat(v);
-  if(!(n>=0)){ alert('\u8bf7\u8f93\u5165\u6709\u6548\u91d1\u989d'); return; }
-  saveBrokerCash(n);
-  if(bc) bc.mv=Math.round(n);
-  recompute();
-  openDetail('stock');
-  syncCashToSheet();
-}
-
-
-// ==================== 买入新股票 ====================
-const STOCK_CATS = GROUP_META.map(function(g){ return g.cat; });
-function renderStockAdd(){
-  const wrap=document.getElementById('stockAddWrap');
-  if(!wrap) return;
-  wrap.innerHTML='<button class="save" style="background:var(--stock);width:100%;border:none;border-radius:14px;padding:14px;font-size:15px;font-weight:600;color:#fff;font-family:inherit;cursor:pointer;margin-top:4px" onclick="showBuyStockForm()">+ \u4e70\u5165\u65b0\u80a1\u7968</button><div id="buyStockForm"></div>';
-}
-function showBuyStockForm(){
-  const selStyle='width:100%;padding:14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
-  const box=document.getElementById('buyStockForm');
-  box.innerHTML=
-    '<div class="editform" style="border-color:var(--stock-ln);margin-top:10px">'+
-      '<div class="fld"><label>\u80a1\u7968\u4ee3\u7801 Symbol</label>'+
-        '<input id="bs-sym" type="text" placeholder="\u4f8b\uff1aNVDA" style="text-transform:uppercase"></div>'+
-      '<div class="fld"><label>\u6210\u672c\u4ef7 ($)</label>'+
-        '<input id="bs-cost" type="number" inputmode="decimal" placeholder="\u4f8b\uff1a150.00"></div>'+
-      '<div class="fld"><label>\u80a1\u6570</label>'+
-        '<input id="bs-sh" type="number" inputmode="decimal" placeholder="\u4f8b\uff1a10"></div>'+
-      '<div class="fld"><label>\u7c7b\u522b</label>'+
-        '<select id="bs-cat" style="'+selStyle+'">'+
-          STOCK_CATS.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('')+
-        '</select></div>'+
-      '<div class="btns">'+
-        '<button class="cancel" onclick="document.getElementById(\'buyStockForm\').innerHTML=\'\'">\u53d6\u6d88</button>'+
-        '<button class="save" style="background:var(--stock)" onclick="submitBuyStock()">\u4e70\u5165</button>'+
-      '</div></div>';
-  document.getElementById('bs-sym').focus();
-}
-function submitBuyStock(){
-  const sym=(document.getElementById('bs-sym').value||'').trim().toUpperCase();
-  const cost=parseFloat(document.getElementById('bs-cost').value);
-  const sh=parseFloat(document.getElementById('bs-sh').value);
-  const cat=document.getElementById('bs-cat').value;
-  if(!sym || !(cost>0) || !(sh>0)){ alert('\u8bf7\u586b\u5199\u4ee3\u7801\u3001\u6210\u672c\u4ef7\u3001\u80a1\u6570'); return; }
-  // 找到对应分组（没有则用第一个）
-  let g=DATA.stock.groups.find(function(x){return x.cat===cat;});
-  if(!g){
-    g={cat:cat, sub:'', semi:(cat===STOCK_CATS[0]), holdings:[]};
-    DATA.stock.groups.push(g);
-  }
-  // 若该股已存在于组内 -> 加权平均
-  let existing=g.holdings.find(function(x){return x.sym===sym;});
-  if(existing){
-    const totSh=existing.shares+sh;
-    existing.cost=(existing.shares*existing.cost+sh*cost)/totSh;
-    existing.shares=totSh;
-  }else{
-    g.holdings.push({sym:sym, shares:sh, cost:cost, price:cost, desc:''});
-  }
-  // 扣券商现金
-  const bc=brokerCashItem(); if(bc){ bc.mv=Math.max(0,Math.round((bc.mv||0)-sh*cost)); saveBrokerCash(bc.mv); }
-  persistStock();
-  recompute();
-  openDetail('stock');
-  // 写回 Sheet：已存在则更新，否则新增
-  const sheetCat=(STOCK_TAXONOMY.find(function(t){return t.cat===cat;})||{}).sheet||'Other ETF';
-  if(existing){
-    syncStockToSheet(existing);
-  }else{
-    pushToSheet({action:'addStock', symbol:sym, category:sheetCat,
-                 shares:Number(sh.toFixed(4)), cost:Number(cost.toFixed(4))});
-  }
-  syncCashToSheet();
-}
-
-
 function showChaseCashForm(){
-  const item=DATA.cash.groups[0].holdings[0];
+  const item=chaseItem();
   const cur=item?item.mv:0;
-  const wrap=document.getElementById('incomeFormWrap');
-  wrap.innerHTML=
+  document.getElementById('incomeFormWrap').innerHTML=
     '<div class="editform" style="border-color:var(--cash-ln)">'+
-      '<div class="fld"><label>Chase \u73b0\u91d1\u4f59\u989d ($)</label>'+
-        '<input id="chase-amt" type="number" inputmode="decimal" value="'+cur+'" placeholder="\u4f8b\uff1a10000"></div>'+
+      '<div class="fld"><label>Chase 现金余额 ($)</label>'+
+        '<input id="chase-amt" type="number" inputmode="decimal" value="'+cur+'"></div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">这是自动收支的基准值，建议每月对一次账</div>'+
       '<div class="btns">'+
-        '<button class="cancel" onclick="document.getElementById(\'incomeFormWrap\').innerHTML=\'\'">\u53d6\u6d88</button>'+
-        '<button class="save" style="background:var(--cash)" onclick="saveChaseCash()">\u4fdd\u5b58</button>'+
+        '<button class="cancel" onclick="document.getElementById(\'incomeFormWrap\').innerHTML=\'\'">取消</button>'+
+        '<button class="save" style="background:var(--cash)" onclick="saveChaseCash()">保存</button>'+
       '</div></div>';
   document.getElementById('chase-amt').focus();
 }
 function saveChaseCash(){
   const n=parseFloat(document.getElementById('chase-amt').value);
-  if(!(n>=0)){ alert('\u8bf7\u8f93\u5165\u6709\u6548\u91d1\u989d'); return; }
-  const item=DATA.cash.groups[0].holdings[0];
+  if(!(n>=0)){ alert('请输入有效金额'); return; }
+  const item=chaseItem();
   if(item){ item.mv=Math.round(n); }
   persistSimple('cash','cashList_v1');
   recompute();
-  openDetail('cash');
+  openDetail('cash', true);
 }
 
+// ==================== 导航 ====================
 function go(id){
   document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
   document.getElementById('scr-'+id).classList.add('active');
+  if(id==='overview') currentDetailKey=null;
   window.scrollTo(0,0);
 }
 
-// ==================== 国债利息弹窗（T-Note 半年付息）====================
+// ==================== 国债利息弹窗 ====================
 function showBondInterestPopups(){
   if(!bondInterestQueue || bondInterestQueue.length===0) return;
   processNextBondInterest();
 }
 function processNextBondInterest(){
-  if(bondInterestQueue.length===0){ 
-    document.getElementById('bondModalMount').innerHTML=''; 
+  if(bondInterestQueue.length===0){
+    document.getElementById('bondModalMount').innerHTML='';
     recompute();
-    return; 
+    return;
   }
   const item=bondInterestQueue[0];
-  const mount=document.getElementById('bondModalMount');
-  mount.innerHTML=
+  document.getElementById('bondModalMount').innerHTML=
     '<div class="imodal-bg"><div class="imodal">'+
-      '<h3>\u56fd\u503a\u5229\u606f\u5230\u8d26</h3>'+
-      '<p>\u56fd\u503a '+item.label+' \u751f\u6210\u5229\u606f\uff08'+item.date.replace(/-/g,'/')+'\uff09</p>'+
+      '<h3>国债利息到账</h3>'+
+      '<p>'+item.label+' 生成利息（'+item.date.replace(/-/g,'/')+'）</p>'+
       '<div class="amt-big">$'+fmt(item.amount)+'</div>'+
-      '<p>\u8bf7\u9009\u62e9\u5b58\u5165\u54ea\u4e2a\u73b0\u91d1\u8d26\u6237\uff1a</p>'+
+      '<p>请选择存入哪个现金账户：</p>'+
       '<div class="choice">'+
         '<button style="background:#1a9d4a" onclick="acceptBondInterest(\'chase\')">Chase</button>'+
         '<button style="background:#7c3aed" onclick="acceptBondInterest(\'marcus\')">Marcus</button>'+
@@ -1867,6 +2141,11 @@ function acceptBondInterest(dest){
   }
   processNextBondInterest();
 }
+
+// ==================== 启动 ====================
+renderOverview();      // 先用本地数据渲染，避免白屏
+renderPropPage();
+syncStockFromSheet();  // 再拉 Sheet，成功后结算工资/定期转账并整页重绘
 showBondInterestPopups();
 
 </script>
