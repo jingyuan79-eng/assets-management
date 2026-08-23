@@ -422,6 +422,8 @@ function setSyncBadge(state, extra){
   else if(state==='ok'){
     const t=new Date();
     el.textContent='已同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+' · Google Sheet';
+  }else if(state==='writing'){
+    el.textContent='写入中…';
   }else if(state==='writeerr'){
     el.classList.add('err');
     el.textContent='写入 Sheet 失败：'+(extra||'未知原因');
@@ -434,6 +436,7 @@ function setSyncBadge(state, extra){
 // ---- 写 Sheet：串行队列 + GET（可拿到回执，写失败会明确报出来）----
 let sheetQueue = Promise.resolve();
 function apiWrite(payload){
+  setSyncBadge('writing');
   sheetQueue = sheetQueue.then(function(){
     const qs = Object.keys(payload).map(function(k){
       const v = payload[k];
@@ -1992,31 +1995,67 @@ function readLedgerForm(){
     note:document.getElementById('lg-note').value.trim()
   };
 }
+// 乐观更新：本地先改 → 立刻刷新界面 → 后台写 Sheet；失败自动撤回
+function applyLocal(fn){
+  fn();
+  rebuildMonthExpense();
+  deductExpenseFromCash(monthExpense);
+  recompute();
+  renderCashTabBody();
+}
+function writeFailed(res, what){
+  alert(what+'失败，已撤回本地改动：\n'+((res&&res.message)||'网络或服务器问题'));
+}
+
 function saveLedgerAdd(){
   const v=readLedgerForm();
   if(!v.date || !(v.amount>0)){ alert('请填写日期和金额'); return; }
+  const tmp={row:-Date.now(), date:v.date, category:v.category,
+             amount:v.amount, note:v.note, key:'', pending:true};
+  applyLocal(function(){ ledgerRows.push(tmp); });
   apiWrite({action:'addLedger', date:v.date, category:v.category, amount:v.amount, note:v.note})
     .then(function(res){
-      if(res && res.status==='success'){ editingLedgerRow=null; return reloadLedger(); }
-      alert('写入失败：'+((res&&res.message)||'未知原因'));
+      if(res && res.status==='success'){ tmp.row=res.row; tmp.pending=false; renderCashTabBody(); }
+      else{ applyLocal(function(){ ledgerRows=ledgerRows.filter(function(x){ return x!==tmp; }); });
+            writeFailed(res,'补记'); }
     });
 }
+
 function saveLedgerEdit(row, expectAmount){
   const v=readLedgerForm();
   if(!v.date || !(v.amount>0)){ alert('请填写日期和金额'); return; }
+  const r=ledgerRows.find(function(x){ return x.row===row; });
+  if(!r) return;
+  const backup=Object.assign({}, r);
+  editingLedgerRow=null;
+  applyLocal(function(){ r.date=v.date; r.category=v.category; r.amount=v.amount; r.note=v.note; });
   apiWrite({action:'updateLedger', row:row, expectAmount:expectAmount,
             date:v.date, category:v.category, amount:v.amount, note:v.note})
     .then(function(res){
-      if(res && res.status==='success'){ editingLedgerRow=null; return reloadLedger(); }
-      alert('修改失败：'+((res&&res.message)||'未知原因'));
+      if(!(res && res.status==='success')){
+        applyLocal(function(){ Object.assign(r, backup); });
+        writeFailed(res,'修改');
+      }
     });
 }
+
 function deleteLedgerRow(row, expectAmount){
   if(!confirm('删除这笔支出？金额会自动加回 Chase。')) return;
+  const idx=ledgerRows.findIndex(function(x){ return x.row===row; });
+  if(idx<0) return;
+  const backup=ledgerRows[idx];
+  editingLedgerRow=null;
+  applyLocal(function(){ ledgerRows.splice(idx,1); });
   apiWrite({action:'deleteLedger', row:row, expectAmount:expectAmount})
     .then(function(res){
-      if(res && res.status==='success'){ editingLedgerRow=null; return reloadLedger(); }
-      alert('删除失败：'+((res&&res.message)||'未知原因'));
+      if(res && res.status==='success'){
+        // Sheet 删行后，后面所有行号上移一位，本地跟着同步，避免下次改到错行
+        ledgerRows.forEach(function(x){ if(x.row>row) x.row--; });
+        renderCashTabBody();
+      }else{
+        applyLocal(function(){ ledgerRows.splice(idx,0,backup); });
+        writeFailed(res,'删除');
+      }
     });
 }
 
