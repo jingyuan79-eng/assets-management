@@ -420,12 +420,12 @@ function setSyncBadge(state, extra){
   if(state==='loading'){ el.textContent='同步中…'; }
   else if(state==='ok'){
     const t=new Date();
-    el.textContent='已同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+' · Google Sheet';
+    el.textContent='已同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
   }else if(state==='writing'){
     el.textContent='写入中…';
   }else if(state==='writeerr'){
     el.classList.add('err');
-    el.textContent='写入 Sheet 失败：'+(extra||'未知原因');
+    el.textContent='保存失败：'+(extra||'未知原因');
   }else{
     el.classList.add('err');
     el.textContent='同步失败，正在使用本地数据';
@@ -665,7 +665,10 @@ function runFixedExpenses(){
 }
 
 // ---- 固定支出：内嵌在 Bill & utilities / Auto & Gas / Pet 的明细页里 ----
-const FIXED_CATS = ['Bill & utilities','Auto & Gas','Pet'];
+// 除了「送礼」和「意外支出」，其余分类都可以设固定支出
+const FIXED_CATS = EXP_CATS.filter(function(c){
+  return c!=='Gifts & Families' && c!=='Other or unexpected';
+});
 let editingFixedId=null;
 
 // 生成某个分类下的「固定支出」区块
@@ -765,7 +768,7 @@ function toggleFixed(id){
   editingFixedId=null; renderCashTabBody();
 }
 function deleteFixed(id){
-  if(!confirm('删除这项固定支出？\n已经写进 Ledger 的历史记录不会被删。')) return;
+  if(!confirm('删除这项固定支出？\n已经记过的账不会被删。')) return;
   saveFixed(loadFixed().filter(function(x){ return x.id!==id; }));
   editingFixedId=null; renderCashTabBody();
 }
@@ -848,8 +851,7 @@ function rebuildSavings(rows){
       nextUpdate:(r.nextUpdate||'').toString().slice(0,10),
       noprice:true,
       qty:(ratePc?ratePc.toFixed(2).replace(/\.?0+$/,'')+'%':''),
-      desc:(mat?('到期 '+mat.replace(/-/g,'/')):'活期')+
-           ((r.nextUpdate)?('  ·  下次入息 '+String(r.nextUpdate).slice(0,10).replace(/-/g,'/')):'')
+      desc:(mat?('到期 '+mat.replace(/-/g,'/')):'活期')
     };
   });
   DATA.cd.groups[0].holdings=list;
@@ -1251,7 +1253,7 @@ function openDetail(k, keepScroll){
         return '<div class="row" style="cursor:pointer" onclick="editSimple(\''+k+'\','+hi+')">'+inner+'</div>';
       }
       if(hh.noprice && hh.sym==='现金'){
-        return '<div class="row" style="cursor:pointer" onclick="editBrokerCash()">'+inner+'</div>'+
+        return '<div class="row" style="cursor:pointer" onclick="showDividendForm()">'+inner+'</div>'+
                '<div class="stock-slot" id="cashslot"></div>';
       }
       return '<div class="row">'+inner+'</div>';
@@ -1385,8 +1387,8 @@ function cdFormHtml(vals, isEdit){
         '<input id="f-name" value="'+(vals.sym||'')+'" placeholder="例：CD-1234" autocomplete="off"></div>'+
       (isEdit?'':'<div class="fld"><label>类型</label>'+
         '<select id="f-type" style="'+selStyle+'">'+
-          '<option value="CD">CD（定期，到期自动转入 OS）</option>'+
-          '<option value="OS">OS（活期）</option>'+
+          '<option value="CD">CD · 定期</option>'+
+          '<option value="OS">OS · 活期</option>'+
         '</select></div>')+
       '<div class="fld"><label>金额 ($)</label>'+
         '<input id="f-mv" type="number" inputmode="decimal" value="'+(vals.mv!=null?vals.mv:'')+'" placeholder="例：10000"></div>'+
@@ -1456,7 +1458,7 @@ function saveCd(){
 function deleteCd(i){
   const item=DATA.cd.groups[0].holdings[i];
   if(!item) return;
-  if(!confirm('删除 '+item.sym+' ？\n会同时删掉 Sheet 里这一行，钱不会自动转到别处。')) return;
+  if(!confirm('删除 '+item.sym+' ？\n钱不会自动转到别处。')) return;
   editingCdIndex=-1;
   DATA.cd.groups[0].holdings.splice(i,1);
   recompute(); openDetail('cd', true);
@@ -1655,7 +1657,7 @@ function showStockPanel(gi,hi){
         '<button class="cancel" onclick="closeStockPanel()">关闭</button>'+
       '</div>'+
       '<div id="stockActionWrap"></div>'+
-      '<div class="delrow"><button class="danger" style="width:100%;border-radius:10px;padding:12px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="deleteStock()">删除持仓（同时删 Sheet 行）</button></div>'+
+      '<div class="delrow"><button class="danger" style="width:100%;border-radius:10px;padding:12px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="deleteStock()">删除持仓</button></div>'+
     '</div>';
   wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
@@ -1667,7 +1669,7 @@ function stockAction(kind){
   if(kind==='price'){
     w.innerHTML='<div class="fld" style="margin-top:12px"><label>新成本价 ($/股)</label>'+
       '<input id="s-price" type="number" inputmode="decimal" value="'+(it.cost||0).toFixed(2)+'"></div>'+
-      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">现价由 Sheet 的 GOOGLEFINANCE 拉取，此处仅修正成本</div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">现价自动更新，此处仅修正成本</div>'+
       '<button class="save" style="background:var(--stock)" onclick="applyPrice()">确认</button>';
     document.getElementById('s-price').focus();
     return;
@@ -1735,7 +1737,7 @@ function applyPrice(){
 function deleteStock(){
   const it=stockItem();
   if(!it) return;
-  if(!confirm('删除 '+it.sym+' ？\n会同时删除 Google Sheet 里这一行，且不影响券商现金。')) return;
+  if(!confirm('删除 '+it.sym+' ？\n这不是卖出，券商现金不会增加。')) return;
   const sym=normSym(it.sym);
   DATA.stock.groups[curStock.gi].holdings.splice(curStock.hi,1);
   afterStockChange();
@@ -1748,34 +1750,40 @@ function afterStockChange(){
   openDetail('stock', true);
 }
 
-// ==================== 券商现金（内联表单，不再用 prompt）====================
-function editBrokerCash(){
-  const bc=brokerCashItem();
-  const cur=bc?bc.mv:loadBrokerCash();
+// ==================== 股票分红入账 ====================
+function showDividendForm(){
   const w=document.getElementById('cashslot');
   if(!w) return;
   if(w.innerHTML){ w.innerHTML=''; return; }
+  const bc=brokerCashItem();
   w.innerHTML=
     '<div class="editform" style="border-color:var(--stock-ln)">'+
-      '<div class="fld"><label>券商可用现金 ($)</label>'+
-        '<input id="bc-amt" type="number" inputmode="decimal" value="'+cur+'"></div>'+
-      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">保存后会写回 Sheet 的 Cash 行 E 列</div>'+
+      '<div style="font-size:15px;font-weight:600;margin-bottom:4px">添加股票分红</div>'+
+      '<div style="font-size:12px;color:var(--ink-2);margin-bottom:12px">当前券商现金 $'+fmt(bc?bc.mv:0)+'</div>'+
+      '<div class="fld"><label>分红金额 ($)</label>'+
+        '<input id="dv-amt" type="number" inputmode="decimal" placeholder="例：42.50"></div>'+
+      '<div class="fld"><label>来自（选填）</label>'+
+        '<input id="dv-from" type="text" placeholder="例：VOO" style="text-transform:uppercase"></div>'+
       '<div class="btns">'+
         '<button class="cancel" onclick="document.getElementById(\'cashslot\').innerHTML=\'\'">取消</button>'+
-        '<button class="save" style="background:var(--stock)" onclick="saveBrokerCashForm()">保存</button>'+
+        '<button class="save" style="background:var(--pos)" onclick="applyDividend()">入账</button>'+
       '</div></div>';
+  document.getElementById('dv-amt').focus();
   w.scrollIntoView({behavior:'smooth',block:'center'});
 }
-function saveBrokerCashForm(){
-  const n=parseFloat(document.getElementById('bc-amt').value);
-  if(!(n>=0)){ alert('请输入有效金额'); return; }
-  saveBrokerCash(n);
+function applyDividend(){
+  const amt=parseFloat(document.getElementById('dv-amt').value);
+  const from=(document.getElementById('dv-from').value||'').trim().toUpperCase();
+  if(!(amt>0)){ alert('请输入分红金额'); return; }
   const bc=brokerCashItem();
-  if(bc) bc.mv=Math.round(n);
+  if(!bc){ alert('股票列表里找不到现金条目，无法入账'); return; }
+  bc.mv=Math.round((bc.mv||0)+amt);
+  saveBrokerCash(bc.mv);
   persistStock();
   recompute();
   openDetail('stock', true);
   syncCashToSheet();
+  alert('已入账分红 $'+fmt(amt)+(from?(' · '+from):''));
 }
 
 // ==================== 买入新股票 ====================
@@ -1951,17 +1959,48 @@ function loadRecurring(){
   try{ return JSON.parse(localStorage.getItem('recurringTransfers_v1')||'[]'); }catch(e){ return []; }
 }
 function saveRecurring(list){ localStorage.setItem('recurringTransfers_v1', JSON.stringify(list)); }
+const XFER_FREQ={weekly:'每周',biweekly:'每两周',monthly:'每月'};
+function nextByFreq(d, freq){
+  const n=new Date(d);
+  if(freq==='weekly') n.setDate(n.getDate()+7);
+  else if(freq==='biweekly') n.setDate(n.getDate()+14);
+  else n.setMonth(n.getMonth()+1);
+  return n;
+}
+// 旧格式（按「年*12+月」计数）迁移成日期 + 频率
+function migrateRecurring(r){
+  if(r.start!=null) return false;
+  const y=Math.floor((r.startYm||0)/12), m=(r.startYm||0)%12;
+  r.start=fmtD(new Date(y, m, 1));
+  r.freq=r.freq||'monthly';
+  if(typeof r.lastRun==='number'){
+    r.lastRun=fmtD(new Date(Math.floor(r.lastRun/12), r.lastRun%12, 1));
+  }else{ r.lastRun=null; }
+  delete r.startYm;
+  return true;
+}
 function runRecurring(){
   const list=loadRecurring();
-  const now=new Date(); const ym=now.getFullYear()*12+now.getMonth();
+  const today=todayD();
   let changed=false;
-  list.forEach(r=>{
-    let last=r.lastRun!=null?r.lastRun:(r.startYm-1);
-    while(last<ym){
-      last++;
-      if(last>=r.startYm){ doTransfer(r.src, r.tgt, r.amt); }
+  list.forEach(function(r){
+    if(migrateRecurring(r)) changed=true;
+    if(!r.start || !(r.amt>0)) return;
+    const freq=r.freq||'monthly';
+    let last=r.lastRun?dateOf(r.lastRun):null;
+    if(!last){
+      const st=dateOf(r.start);
+      if(st<=today){ doTransfer(r.src, r.tgt, r.amt); last=st; }
     }
-    if(r.lastRun!==last){ r.lastRun=last; changed=true; }
+    if(last){
+      let guard=0;
+      while(guard++<400){
+        const nx=nextByFreq(last, freq);
+        if(nx<=today){ doTransfer(r.src, r.tgt, r.amt); last=nx; } else break;
+      }
+      const ds=fmtD(last);
+      if(r.lastRun!==ds){ r.lastRun=ds; changed=true; }
+    }
   });
   if(changed) saveRecurring(list);
 }
@@ -1982,35 +2021,46 @@ function renderTransfer(){
         '<div><div style="font-size:22px;font-weight:600" class="num">$'+fmt(chase)+'</div><div style="font-size:11px;color:var(--ink-faint)">Chase</div></div>'+
         '<div><div style="font-size:22px;font-weight:600" class="num">$'+fmt(marcus)+'</div><div style="font-size:11px;color:var(--ink-faint)">Marcus OS</div></div>'+
       '</div></div>'+
-    '<div class="group"><div class="grp-head"><div class="cat">一次性转账</div></div>'+
-      '<div style="padding:14px">'+
-        transferFormFields('o')+
-        '<button style="background:var(--cash);color:#fff;width:100%;margin-top:6px;border:none;border-radius:14px;padding:15px;font-size:16px;font-weight:600;font-family:inherit;cursor:pointer" onclick="submitOneTime()">确认转账</button>'+
-      '</div></div>'+
-    '<div class="group"><div class="grp-head"><div class="cat">设置定期转账<span class="sub">每月自动执行</span></div></div>'+
-      '<div style="padding:14px">'+
-        transferFormFields('r')+
-        '<button style="background:var(--retire);color:#fff;width:100%;margin-top:6px;border:none;border-radius:14px;padding:15px;font-size:16px;font-weight:600;font-family:inherit;cursor:pointer" onclick="submitRecurring()">保存定期转账</button>'+
-      '</div></div>';
+    '<div style="font-size:13px;font-weight:600;color:var(--ink);margin:18px 2px 8px">一次性转账</div>'+
+    '<div class="editform" style="border-color:var(--cash-ln);margin-top:0">'+
+      transferFormFields('o', false)+
+      '<div class="btns"><button class="save" style="background:var(--cash)" onclick="submitOneTime()">确认转账</button></div>'+
+    '</div>'+
+    '<div style="font-size:13px;font-weight:600;color:var(--ink);margin:18px 2px 8px">定期转账<span style="font-weight:400;color:var(--ink-faint)"> · 到期自动执行</span></div>'+
+    '<div class="editform" style="border-color:var(--retire-ln);margin-top:0">'+
+      transferFormFields('r', true)+
+      '<div class="btns"><button class="save" style="background:var(--retire)" onclick="submitRecurring()">保存定期转账</button></div>'+
+    '</div>';
   if(rec.length){
     html+='<div class="group"><div class="grp-head"><div class="cat">已设置的定期转账</div></div>'+
       rec.map(function(r,i){
         return '<div class="row"><div class="tk" style="width:auto;flex:1">'+
           '<div class="sym" style="font-size:13px">'+optName(SRC_OPTS,r.src)+' → '+optName(TGT_OPTS,r.tgt)+'</div>'+
-          '<div class="qty">每月 $'+fmt(r.amt)+'</div></div>'+
+          '<div class="qty">'+(XFER_FREQ[r.freq||'monthly'])+' $'+fmt(r.amt)+'</div></div>'+
           '<div class="val"><button class="cancel" style="padding:6px 12px;font-size:12px;border:none;border-radius:8px;background:#fdecec;color:var(--neg);font-family:inherit;font-weight:600;cursor:pointer" onclick="delRecurring('+i+')">删除</button></div></div>';
       }).join('')+'</div>';
   }
   body.innerHTML=html;
 }
-function transferFormFields(p){
-  const st='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
-  return '<div class="fld"><label>From</label>'+
-      '<select id="'+p+'-src" style="'+st+'">'+SRC_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
+const XFER_SEL='width:100%;border:1px solid var(--line);border-radius:10px;background:#fafbfc;'+
+  'padding:11px 12px;font-size:16px;color:var(--ink);font-family:inherit;-webkit-appearance:none';
+function transferFormFields(p, withFreq){
+  let h='<div class="fld"><label>From</label>'+
+      '<select id="'+p+'-src" style="'+XFER_SEL+'">'+SRC_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
     '<div class="fld"><label>To</label>'+
-      '<select id="'+p+'-tgt" style="'+st+'">'+TGT_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
+      '<select id="'+p+'-tgt" style="'+XFER_SEL+'">'+TGT_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
     '<div class="fld"><label>金额 ($)</label>'+
-      '<input id="'+p+'-amt" type="number" inputmode="decimal" placeholder="例：500" style="'+st+';-webkit-appearance:none"></div>';
+      '<input id="'+p+'-amt" type="number" inputmode="decimal" placeholder="例：500"></div>';
+  if(withFreq){
+    h+='<div class="fld"><label>频率</label>'+
+      '<select id="'+p+'-freq" style="'+XFER_SEL+'">'+
+        Object.keys(XFER_FREQ).map(function(k){
+          return '<option value="'+k+'"'+(k==='monthly'?' selected':'')+'>'+XFER_FREQ[k]+'</option>';
+        }).join('')+'</select></div>'+
+      '<div class="fld"><label>首次转账日</label>'+
+        '<input id="'+p+'-start" type="date" value="'+fmtD(todayD())+'"></div>';
+  }
+  return h;
 }
 function submitOneTime(){
   const src=document.getElementById('o-src').value;
@@ -2029,13 +2079,18 @@ function submitRecurring(){
   const src=document.getElementById('r-src').value;
   const tgt=document.getElementById('r-tgt').value;
   const amt=parseFloat(document.getElementById('r-amt').value);
+  const freq=document.getElementById('r-freq').value;
+  const start=document.getElementById('r-start').value;
   if(!(amt>0)){ alert('请输入金额'); return; }
+  if(!start){ alert('请选择首次转账日'); return; }
   const list=loadRecurring();
-  const now=new Date();
-  list.push({src,tgt,amt:Math.round(amt), startYm:now.getFullYear()*12+now.getMonth(), lastRun:now.getFullYear()*12+now.getMonth()});
+  // lastRun 留空：首次转账日到了就执行；设在未来则等到那天
+  list.push({src:src, tgt:tgt, amt:Math.round(amt), freq:freq, start:start, lastRun:null});
   saveRecurring(list);
+  runRecurring();
+  recompute();
   renderTransfer();
-  alert('定期转账已设置：每月 $'+fmt(amt)+'（从下个月开始自动执行）');
+  alert('已设置：'+XFER_FREQ[freq]+' $'+fmt(amt)+'，从 '+start.replace(/-/g,'/')+' 起');
 }
 function delRecurring(i){
   const list=loadRecurring(); list.splice(i,1); saveRecurring(list); renderTransfer();
