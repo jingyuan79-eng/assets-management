@@ -250,11 +250,9 @@ const DATA = {
   },
   cd: {
     name:"储蓄", color:"var(--cd)", key:"cd", meta:"Marcus · 定存+活期",
-    groups:[ { cat:"定期存单", sub:"", holdings:[
-      {sym:"CD-7597", rate:4.0, mat:"2027-06-30", baseMv:21264, updated:"2026-07-31"},
-      {sym:"CD-9185", rate:4.1, mat:"2027-02-05", baseMv:10239, updated:"2026-07-31"},
-      {sym:"OS-9250", rate:3.4, mat:"", baseMv:41000, updated:"2026-08-01"},
-    ]}]
+    // 数据全部来自 Sheet 的 Savings 表，本地不留种子：
+    // 同步失败时宁可显示 $0 + 红色提示，也不要显示一份过期的假余额
+    groups:[ { cat:"定期存单", sub:"", holdings:[] }]
   },
   bond: {
     name:"国债", color:"var(--bond)", key:"bond", meta:"TreasuryDirect · 均 3.98%",
@@ -333,15 +331,12 @@ const SYM_DESC = {
 };
 
 // ==================== localStorage ====================
-function loadCd(){
-  try{
-    localStorage.removeItem('assetAdditions'); localStorage.removeItem('cdList');
-    const raw = localStorage.getItem('cdList_v3');
-    if(raw){ DATA.cd.groups[0].holdings = JSON.parse(raw); }
-    else{ localStorage.setItem('cdList_v3', JSON.stringify(DATA.cd.groups[0].holdings)); }
-  }catch(e){ console.log('cd load err',e); }
+// 清掉历史遗留的键（储蓄已迁到 Sheet，不再本地存）
+function cleanLegacyKeys(){
+  ['assetAdditions','cdList','bondList','cdList_v3'].forEach(function(k){
+    try{ localStorage.removeItem(k); }catch(e){}
+  });
 }
-function persistCd(){ localStorage.setItem('cdList_v3', JSON.stringify(DATA.cd.groups[0].holdings)); }
 
 function emptyStockGroups(){
   return GROUP_META.map(function(m){ return {cat:m.cat, sub:m.sub, semi:m.semi||false, holdings:[]}; });
@@ -380,13 +375,14 @@ function loadBond(){
 }
 function persistBond(){ localStorage.setItem('bondList_v2', JSON.stringify(DATA.bond.groups[0].holdings)); }
 
-loadCd(); loadStock(); loadSimple('cash','cashList_v1'); loadSimple('hsa','hsaList_v1');
+cleanLegacyKeys(); loadStock(); loadSimple('cash','cashList_v1'); loadSimple('hsa','hsaList_v1');
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
 
 let monthExpense = {};
 let ledgerRows = [];      // 当月+上月流水明细（来自 Sheet，可改可删）
+let ledgerMonths = [];    // 后端声明「明细完整」的月份，只有这些月才允许由本地重算总计
 let monthlyTotals = {};   // 各月支出总计（Sheet 的 Monthly 表算好的）
 let syncOk = false;
 let notices = [];      // Apps Script 自动做过的事（CD 到期转账等）
@@ -483,6 +479,7 @@ function syncStockFromSheet(){
       persistStock();
       ledgerRows = Array.isArray(data.ledger) ? data.ledger : [];
       monthlyTotals = data.monthly || {};
+      ledgerMonths = data.ledgerMonths || [];
       rebuildSavings(data.savings);
       notices = data.notices || [];
       syncOk = true;
@@ -509,23 +506,6 @@ function syncStockFromSheet(){
     });
 }
 
-// 改完一笔支出后：重新拉流水并刷新界面
-function reloadLedger(){
-  return fetch(SHEET_API+'?_t='+Date.now())
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      if(data && data.status==='success'){
-        ledgerRows = Array.isArray(data.ledger) ? data.ledger : [];
-        monthlyTotals = data.monthly || {};
-        rebuildMonthExpense();
-        recalcMonthlyFromLedger();
-        syncExpenseDeduction();
-        recompute();
-        if(document.getElementById('cashTabBody')) renderCashTabBody();
-      }
-    })
-    .catch(function(e){ console.log('reload ledger failed', e); });
-}
 
 function rebuildStockGroups(rows){
   const groups = emptyStockGroups();
@@ -610,7 +590,11 @@ function syncExpenseDeduction(){
 }
 // 本地改过流水后，用本地明细覆盖对应月份的总计（只覆盖手上有明细的那两个月）
 function recalcMonthlyFromLedger(){
+  // 只重算「后端声明明细完整」的那几个月，并先清零再累加——
+  // 清零是必须的：否则把某月支出全删光时该月不出现在 m 里，旧总计残留，钱加不回 Chase。
+  // 但绝不能凭空猜测月份：万一后端没给 ledgerMonths，就一个月都不清零，宁可不动也不能误抹。
   const m={};
+  (ledgerMonths||[]).forEach(function(ym){ m[ym]=0; });
   ledgerRows.forEach(function(r){
     const ym=(r.date||'').slice(0,7);
     if(!ym) return;
@@ -846,8 +830,6 @@ let pendingEvents = [];
 function todayD(){ const d=new Date(); d.setHours(0,0,0,0); return d; }
 function dateOf(s){ return new Date(s+'T00:00:00'); }
 function fmtD(d){ return d.toISOString().slice(0,10); }
-function daysBetween(d1,d2){ return Math.max(0, Math.round((d2 - d1)/86400000)); }
-function firstOfNextMonth(d){ return new Date(d.getFullYear(), d.getMonth()+1, 1); }
 function newId(pfx){ return pfx+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 
 // ---- 储蓄：全部由 Apps Script 计算，小程序只负责显示 ----
@@ -872,7 +854,6 @@ function rebuildSavings(rows){
   });
   DATA.cd.groups[0].holdings=list;
 }
-function rollAllCd(){ /* 计息已搬到 Apps Script，这里不再做任何事 */ }
 function marcusItem(){
   return DATA.cd.groups[0].holdings.find(function(x){ return x.type==='OS'; })
       || DATA.cd.groups[0].holdings[0] || null;
@@ -958,7 +939,6 @@ function rollAllBond(){ DATA.bond.groups[0].holdings.forEach(rollBond); persistB
 // 每次重算都刷新事件队列（纯计算，不改账）
 function rebuildEvents(){
   pendingEvents=[];
-  rollAllCd();
   rollAllBond();
   pendingEvents.sort(function(a,b){ return a.date<b.date?-1:a.date>b.date?1:0; });
 }
@@ -978,16 +958,12 @@ function settleEvent(dest){
   const ev=pendingEvents[0];
   if(!ev) return;
   addMoneyTo(dest, ev.amount);
-  if(ev.src==='cd'){
-    DATA.cd.groups[0].holdings=DATA.cd.groups[0].holdings.filter(function(x){ return x.id!==ev.id; });
-    persistCd();
-  }else{
-    const it=DATA.bond.groups[0].holdings.find(function(x){ return x.id===ev.id; });
-    if(it && ev.kind==='coupon'){ it.lastCoupon=ev.couponDate; persistBond(); }
-    else{
-      DATA.bond.groups[0].holdings=DATA.bond.groups[0].holdings.filter(function(x){ return x.id!==ev.id; });
-      persistBond();
-    }
+  // 目前只有国债会产生待入账事件；CD 到期由 Apps Script 自动转入 OS，不走这里
+  const it=DATA.bond.groups[0].holdings.find(function(x){ return x.id===ev.id; });
+  if(it && ev.kind==='coupon'){ it.lastCoupon=ev.couponDate; persistBond(); }
+  else{
+    DATA.bond.groups[0].holdings=DATA.bond.groups[0].holdings.filter(function(x){ return x.id!==ev.id; });
+    persistBond();
   }
   rebuildEvents();
   recompute();
@@ -1223,7 +1199,7 @@ function refreshOpenDetail(){
 
 // ==================== 详情页 ====================
 function openDetail(k, keepScroll){
-  if(k==='cd'||k==='bond') rebuildEvents();
+  if(k==='bond') rebuildEvents();
   if(k==='retire') roll401k();
   currentDetailKey=k;
   computeTotals();
@@ -1709,12 +1685,19 @@ function applyBuy(){
   const sh=parseFloat(document.getElementById('s-sh').value);
   const px=parseFloat(document.getElementById('s-px').value);
   if(!(sh>0)||!(px>0)){ alert('请输入股数和价格'); return; }
+  // 所有校验必须放在修改数据之前，否则用户点「取消」时持仓已经被改掉了
+  const bc=brokerCashItem();
+  if(!bc){ alert('Sheet 的 Stock 表里找不到 Cash 行，无法扣款。请先补一行 Cash。'); return; }
+  const cost0=sh*px;
+  if(cost0 > (bc.mv||0)+0.5){
+    if(!confirm('券商现金只有 $'+fmt(bc.mv||0)+'，本次买入需要 $'+fmt(cost0)+
+                '。\n继续的话现金会变成负数（说明有转入没记）。要继续吗？')) return;
+  }
   const newShares=it.shares+sh;
   it.cost=(it.shares*it.cost + sh*px)/newShares;
   it.shares=newShares;
   it.price=px;
-  const bc=brokerCashItem();
-  if(bc){ bc.mv=Math.max(0,Math.round((bc.mv||0)-sh*px)); saveBrokerCash(bc.mv); }
+  bc.mv=Math.round((bc.mv||0)-cost0); saveBrokerCash(bc.mv);
   afterStockChange();
   syncStockToSheet(it);
   syncCashToSheet();
@@ -1827,6 +1810,14 @@ function submitBuyStock(){
   const sh=parseFloat(document.getElementById('bs-sh').value);
   const cat=document.getElementById('bs-cat').value;
   if(!sym || !(cost>0) || !(sh>0)){ alert('请填写代码、成本价、股数'); return; }
+  // 校验先做完，再动数据（避免点「取消」后持仓已被改）
+  const bc=brokerCashItem();
+  if(!bc){ alert('Sheet 的 Stock 表里找不到 Cash 行，无法扣款。请先补一行 Cash。'); return; }
+  const need=sh*cost;
+  if(need > (bc.mv||0)+0.5){
+    if(!confirm('券商现金只有 $'+fmt(bc.mv||0)+'，本次买入需要 $'+fmt(need)+
+                '。\n继续的话现金会变成负数（说明有转入没记）。要继续吗？')) return;
+  }
   let g=DATA.stock.groups.find(function(x){return x.cat===cat;});
   if(!g){
     const meta=GROUP_META.find(function(m){return m.cat===cat;})||{cat:cat, sub:'', semi:false};
@@ -1841,8 +1832,7 @@ function submitBuyStock(){
   }else{
     g.holdings.push({sym:sym, shares:sh, cost:cost, price:cost, desc:SYM_DESC[sym]||''});
   }
-  const bc=brokerCashItem();
-  if(bc){ bc.mv=Math.max(0,Math.round((bc.mv||0)-sh*cost)); saveBrokerCash(bc.mv); }
+  bc.mv=Math.round((bc.mv||0)-need); saveBrokerCash(bc.mv);
   persistStock();
   recompute();
   openDetail('stock', true);
