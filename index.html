@@ -528,7 +528,7 @@ function rebuildStockGroups(rows){
       const sheetCash = parseFloat(row.price);
       const cashVal = isFinite(sheetCash) ? sheetCash : loadBrokerCash();
       saveBrokerCash(cashVal);
-      g.holdings.push({sym:'现金', noprice:true, mv:Math.round(cashVal), desc:'券商可用·可点击编辑'});
+      g.holdings.push({sym:'现金', noprice:true, mv:Math.round(cashVal), desc:'券商账户现金 · 点击添加股票分红'});
       return;
     }
 
@@ -1730,11 +1730,8 @@ function showDividendForm(){
   const w=document.getElementById('cashslot');
   if(!w) return;
   if(w.innerHTML){ w.innerHTML=''; return; }
-  const bc=brokerCashItem();
   w.innerHTML=
     '<div class="editform" style="border-color:var(--stock-ln)">'+
-      '<div style="font-size:15px;font-weight:600;margin-bottom:4px">添加股票分红</div>'+
-      '<div style="font-size:12px;color:var(--ink-2);margin-bottom:12px">当前券商现金 $'+fmt(bc?bc.mv:0)+'</div>'+
       '<div class="fld"><label>分红金额 ($)</label>'+
         '<input id="dv-amt" type="number" inputmode="decimal" placeholder="例：42.50"></div>'+
       '<div class="fld"><label>来自（选填）</label>'+
@@ -2113,21 +2110,8 @@ function renderCashTabBody(){
     const freqLabel={weekly:'每周',biweekly:'每两周',monthly:'每月'};
     const payrollLine = p&&p.amount ? ('已设：'+(freqLabel[p.freq]||'每两周')+' $'+fmt(p.amount)) : '未设置';
     const mt=(monthlyTotals||{})[curYm()]||{};
-    const inSum=mt.income||0, exSum=mt.expense||0, tfSum=mt.transfer||0;
-    const net=inSum-exSum-tfSum;
+    const inSum=mt.income||0, net=(mt.income||0)-(mt.expense||0)-(mt.transfer||0);
     body.innerHTML=
-      '<div style="display:flex;gap:8px;margin-bottom:12px">'+
-        '<div style="flex:1;background:var(--cash-bg);border-radius:14px;padding:11px 12px">'+
-          '<div style="font-size:11px;color:var(--ink-2)">本月收入</div>'+
-          '<div class="num" style="font-size:17px;font-weight:650;color:var(--ink)">$'+fmt(inSum)+'</div></div>'+
-        '<div style="flex:1;background:#F8CCD8;border-radius:14px;padding:11px 12px">'+
-          '<div style="font-size:11px;color:#B86A78">本月支出</div>'+
-          '<div class="num" style="font-size:17px;font-weight:650;color:var(--ink)">$'+fmt(exSum)+'</div></div>'+
-        '<div style="flex:1;background:var(--card);border-radius:14px;padding:11px 12px">'+
-          '<div style="font-size:11px;color:var(--ink-2)">净流入</div>'+
-          '<div class="num" style="font-size:17px;font-weight:650;color:'+(net>=0?'var(--pos)':'var(--neg)')+'">'+
-            (net>=0?'+':'−')+'$'+fmt(Math.abs(net))+'</div></div>'+
-      '</div>'+
       '<div class="group" style="background:#ECEEE1;border:none">'+
         '<div class="row" style="border-color:rgba(0,0,0,.05);cursor:pointer" onclick="showPayrollForm()">'+
           '<div class="tk" style="width:auto;flex:1"><div class="sym" style="color:#4F5D7A">Payroll</div>'+
@@ -2144,10 +2128,17 @@ function renderCashTabBody(){
         '<br>点下面的「对账」填入银行 App 上的真实余额，从此自动计算。</div>')+
       '<div id="incomeFormWrap"></div>'+
       '<div style="display:flex;gap:10px;margin-top:12px">'+
-        '<button style="flex:1;padding:13px;border:none;border-radius:14px;background:var(--cash-bg);color:var(--cash);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="showReconcileForm()">对账</button>'+
-        '<button style="flex:1;padding:13px;border:none;border-radius:14px;background:#F8CCD8;color:#B86A78;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="recalcHistory()">重算历史</button>'+
+        '<div style="flex:1;border-radius:14px;padding:11px 12px;background:var(--cash-bg);text-align:center">'+
+          '<div style="font-size:11px;color:var(--cash);font-weight:600">本月收入</div>'+
+          '<div class="num" style="font-size:16px;font-weight:650;color:var(--ink);margin-top:2px">$'+fmt(inSum)+'</div></div>'+
+        '<div style="flex:1;border-radius:14px;padding:11px 12px;background:#f3e9fd;text-align:center">'+
+          '<div style="font-size:11px;color:var(--cd);font-weight:600">净流入</div>'+
+          '<div class="num" style="font-size:16px;font-weight:650;color:'+(net>=0?'var(--pos)':'var(--neg)')+';margin-top:2px">'+
+            (net>=0?'+':'−')+'$'+fmt(Math.abs(net))+'</div></div>'+
+        '<button style="flex:1;border:none;border-radius:14px;padding:11px 12px;background:var(--stock-bg);'+
+          'color:var(--stock);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="showReconcileForm()">对账</button>'+
       '</div>';
-  }else if(expenseDrill){
+    }else if(expenseDrill){
     renderExpenseDrill(body);
   }else{
     const amounts={}; EXP_CATS.forEach(function(c){ amounts[c]=0; });
@@ -2197,7 +2188,10 @@ function drillRows(){
 
 function renderExpenseDrill(body){
   const rows=drillRows();
-  const sum=rows.reduce(function(s,r){ return s+(parseFloat(r.amount)||0); },0);
+  // 合计只算支出：全部明细里也会列出收入/转账行，但它们不计入这个数
+  const sum=rows.reduce(function(s,r){
+    return s + (catKind(r.category)==='expense' ? (parseFloat(r.amount)||0) : 0);
+  },0);
   const title=(expenseDrill==='__ALL__')?'本月全部支出':expenseDrill;
   let html=
     '<div style="display:flex;align-items:center;gap:10px;margin:2px 2px 12px">'+
@@ -2406,15 +2400,15 @@ function showReconcileForm(){
     'padding:11px 12px;font-size:16px;color:var(--ink);font-family:inherit;-webkit-appearance:none';
   wrap.innerHTML=
     '<div class="editform" style="border-color:var(--cash-ln)">'+
-      '<div style="font-size:12px;color:var(--ink-2);margin-bottom:12px">'+
-        '按流水算出来是 <b>$'+fmt(cashInfo.balance)+'</b>'+
-        (cashInfo.anchorDate?('　·　上次对账 '+cashInfo.anchorDate.replace(/-/g,'/')):'　·　还没对过账')+'</div>'+
+      '<div style="font-size:15px;font-weight:600;margin-bottom:4px">手动修改余额</div>'+
+      '<div style="font-size:12px;color:var(--ink-faint);margin-bottom:12px">'+
+        (cashInfo.anchorDate?('上次对账 '+cashInfo.anchorDate.replace(/-/g,'/')):'还没对过账')+'</div>'+
       '<div class="fld"><label>银行 App 上的真实余额 ($)</label>'+
         '<input id="rc-amt" type="number" inputmode="decimal" placeholder="例：9450" oninput="updateReconcileDiff()"></div>'+
       '<div id="rc-diff" style="font-size:12px;color:var(--ink-faint);margin-bottom:12px">输入后显示差额</div>'+
       '<div class="fld"><label>差额怎么处理</label>'+
         '<select id="rc-mode" style="'+st+'" onchange="updateReconcileDiff()">'+
-          '<option value="adjust">只调余额（信用卡时间差等）</option>'+
+          '<option value="adjust">只调余额</option>'+
           '<option value="expense">记为一笔支出</option>'+
           '<option value="income">记为一笔收入</option>'+
         '</select></div>'+
@@ -2425,6 +2419,7 @@ function showReconcileForm(){
       '<div class="btns">'+
         '<button class="cancel" onclick="document.getElementById(\'incomeFormWrap\').innerHTML=\'\'">取消</button>'+
         '<button class="save" style="background:var(--cash)" onclick="submitReconcile()">确认对账</button>'+
+        '<button class="save" style="background:#B86A78" onclick="recalcHistory()">重算历史</button>'+
       '</div></div>';
   document.getElementById('rc-amt').focus();
 }
