@@ -135,7 +135,7 @@
   .cashtabs{display:flex;gap:8px;margin:16px 2px 12px;}
   .cashtab{flex:1;text-align:center;padding:11px;border-radius:12px;font-size:14px;font-weight:600;
     cursor:pointer;border:none;background:var(--card);color:var(--ink-2);transition:all .15s;}
-  .cashtab.on-in{background:#EBEDE8;border:none;color:#4F5D7A;}
+  .cashtab.on-in{background:var(--cash-bg);border:none;color:var(--cash);}
   .cashtab.on-ex{background:#F8CCD8;border:none;color:#B86A78;}
   .expgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:4px;}
   .expcell{border:none;border-radius:14px;padding:11px 10px;}
@@ -333,7 +333,7 @@ const SYM_DESC = {
 // ==================== localStorage ====================
 // 清掉历史遗留的键（储蓄已迁到 Sheet，不再本地存）
 function cleanLegacyKeys(){
-  ['assetAdditions','cdList','bondList','cdList_v3'].forEach(function(k){
+  ['assetAdditions','cdList','bondList','cdList_v3','cashList_v1','expenseDeducted_v1','expenseDeducted_v2'].forEach(function(k){
     try{ localStorage.removeItem(k); }catch(e){}
   });
 }
@@ -375,7 +375,7 @@ function loadBond(){
 }
 function persistBond(){ localStorage.setItem('bondList_v2', JSON.stringify(DATA.bond.groups[0].holdings)); }
 
-cleanLegacyKeys(); loadStock(); loadSimple('cash','cashList_v1'); loadSimple('hsa','hsaList_v1');
+cleanLegacyKeys(); loadStock(); loadSimple('hsa','hsaList_v1');
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -464,8 +464,13 @@ function syncStockToSheet(it){
   apiWrite({action:'updateStock', symbol:normSym(it.sym),
             shares:Number(it.shares.toFixed(4)), cost:Number(it.cost.toFixed(4))});
 }
-function syncCashToSheet(){
-  apiWrite({action:'updateCash', amount:loadBrokerCash()});
+// 券商现金一律按「增量」写回：本地值可能是过期的，写绝对值会把别处的改动覆盖掉
+function adjustBrokerCash(delta){
+  const d=Math.round(delta*100)/100;
+  if(!d) return Promise.resolve();
+  const bc=brokerCashItem();
+  if(bc){ bc.mv=Math.round((bc.mv||0)+d); saveBrokerCash(bc.mv); persistStock(); }
+  return apiWrite({action:'adjustCash', delta:d});
 }
 
 // ---- 读 Sheet ----
@@ -480,14 +485,13 @@ function syncStockFromSheet(){
       ledgerRows = Array.isArray(data.ledger) ? data.ledger : [];
       monthlyTotals = data.monthly || {};
       ledgerMonths = data.ledgerMonths || [];
+      setCashFromServer(data.cash);
       rebuildSavings(data.savings);
       notices = data.notices || [];
       syncOk = true;
       // 固定支出：把本月该记的自动写进 Ledger（Sheet 端按 key 去重）
       return runFixedExpenses().then(function(){
         rebuildMonthExpense();
-        recalcMonthlyFromLedger();
-        syncExpenseDeduction();
         runPayroll();
         runRecurring();
         setSyncBadge('ok');
@@ -544,65 +548,30 @@ function rebuildStockGroups(rows){
   DATA.stock.groups = groups.filter(function(g){ return g.holdings.length>0; });
 }
 
-// ==================== 支出自动扣现金（按月对账）====================
-// 每个月单独记「已经从 Chase 扣掉多少」，和 Sheet 算出来的该月总计比对，
-// 只补差额。跨月不清零，所以隔几天不开也不会漏扣上个月月末的支出。
+// ==================== 流动现金（Chase）====================
+// 余额 = 锚点金额 + 锚点当天及之后的流水，由 Apps Script 算出权威值；
+// 本地编辑时先按增量调整，等下次同步再对齐。不再有「已扣多少」这种状态。
+let cashInfo = { balance:0, anchorDate:'', anchorAmount:0, hasAnchor:false };
 
-function loadDeducted(){
-  try{
-    const v2=localStorage.getItem('expenseDeducted_v2');
-    if(v2) return JSON.parse(v2);
-  }catch(e){}
-  return null;
+function catKind(cat){
+  const c=(cat||'').toString().trim();
+  if(c.indexOf('Income')===0) return 'income';
+  if(c.indexOf('Transfer')===0) return 'transfer';
+  return 'expense';
 }
-function saveDeducted(st){ localStorage.setItem('expenseDeducted_v2', JSON.stringify(st)); }
+function catSign(cat){ return catKind(cat)==='income' ? 1 : -1; }
+function signedOf(r){ return catSign(r.category)*(parseFloat(r.amount)||0); }
 
-// 从旧版 {ym,total} 迁移：把历史各月标记为「已扣」，避免升级后被追溯扣一大笔
-function migrateDeducted(monthly){
-  let old=null;
-  try{ old=JSON.parse(localStorage.getItem('expenseDeducted_v1')||'null'); }catch(e){}
-  const st={};
-  Object.keys(monthly||{}).forEach(function(ym){
-    if(!old || !old.ym){ st[ym]=parseFloat(monthly[ym])||0; return; }  // 全新安装：历史全部视为已扣
-    if(ym < old.ym)      st[ym]=parseFloat(monthly[ym])||0;            // 比旧记录更早：已扣过
-    else if(ym===old.ym) st[ym]=parseFloat(old.total)||0;              // 旧记录那个月：按已扣金额，差额补上
-    else                 st[ym]=0;                                     // 之后的月份：旧版从未扣过，全额补扣
-  });
-  saveDeducted(st);
-  localStorage.removeItem('expenseDeducted_v1');
-  return st;
+function applyCashDelta(d){
+  cashInfo.balance = Math.round((cashInfo.balance + d)*100)/100;
+  const c=chaseItem();
+  if(c) c.mv = Math.round(cashInfo.balance);
 }
-
-function syncExpenseDeduction(){
-  let st=loadDeducted();
-  if(!st) st=migrateDeducted(monthlyTotals);
-  let delta=0;
-  Object.keys(monthlyTotals||{}).forEach(function(ym){
-    const t=parseFloat(monthlyTotals[ym])||0;
-    const d=t-(st[ym]||0);
-    if(Math.abs(d)>0.001){ delta+=d; st[ym]=t; }
-  });
-  if(Math.abs(delta)>0.001){
-    const c=chaseItem();
-    if(c){ c.mv=Math.round((c.mv||0)-delta); persistSimple('cash','cashList_v1'); }
-  }
-  saveDeducted(st);
+function setCashFromServer(info){
+  cashInfo = info || { balance:0, anchorDate:'', anchorAmount:0, hasAnchor:false };
+  const c=chaseItem();
+  if(c) c.mv = Math.round(cashInfo.balance||0);
 }
-// 本地改过流水后，用本地明细覆盖对应月份的总计（只覆盖手上有明细的那两个月）
-function recalcMonthlyFromLedger(){
-  // 只重算「后端声明明细完整」的那几个月，并先清零再累加——
-  // 清零是必须的：否则把某月支出全删光时该月不出现在 m 里，旧总计残留，钱加不回 Chase。
-  // 但绝不能凭空猜测月份：万一后端没给 ledgerMonths，就一个月都不清零，宁可不动也不能误抹。
-  const m={};
-  (ledgerMonths||[]).forEach(function(ym){ m[ym]=0; });
-  ledgerRows.forEach(function(r){
-    const ym=(r.date||'').slice(0,7);
-    if(!ym) return;
-    m[ym]=(m[ym]||0)+(parseFloat(r.amount)||0);
-  });
-  Object.keys(m).forEach(function(ym){ monthlyTotals[ym]=Math.round(m[ym]*100)/100; });
-}
-
 // ==================== 固定支出引擎 ====================
 // 配置存 localStorage（这是设置，不是流水）；防重复键存在 Sheet 的 E 列，
 // 所以手机和电脑各打开一次也不会重复记账。
@@ -633,7 +602,14 @@ function dueDates(item){
 function ledgerHasKey(k){
   return ledgerRows.some(function(r){ return (r.key||'')===k; });
 }
+let fixedRunning=null;   // 正在跑就复用同一个 Promise，避免两处同时算出同一笔任务
 function runFixedExpenses(){
+  if(fixedRunning) return fixedRunning;
+  fixedRunning=runFixedExpensesInner().then(function(v){ fixedRunning=null; return v; },
+                                           function(e){ fixedRunning=null; throw e; });
+  return fixedRunning;
+}
+function runFixedExpensesInner(){
   const list=loadFixed().filter(function(x){ return x.enabled!==false; });
   const jobs=[];
   list.forEach(function(it){
@@ -651,8 +627,9 @@ function runFixedExpenses(){
                        category:j.item.category, amount:j.item.amount,
                        note:j.item.name+'（固定）'}).then(function(res){
         if(res && res.status==='success'){
-          ledgerRows.push({row:res.row, date:j.date, category:j.item.category,
-                           amount:j.item.amount, note:j.item.name+'（固定）', key:j.key});
+          const nr={row:res.row, date:j.date, category:j.item.category,
+                    amount:j.item.amount, note:j.item.name+'（固定）', key:j.key};
+          ledgerRows.push(nr); applyCashDelta(signedOf(nr));
         }else if(res && res.status==='skipped'){
           // Sheet 里已存在（多设备场景），本地补一条占位，避免重复判断
           ledgerRows.push({row:res.row, date:j.date, category:j.item.category,
@@ -757,8 +734,7 @@ function saveFixed_(cat){
   editingFixedId=null;
   renderCashTabBody();
   runFixedExpenses().then(function(){
-    rebuildMonthExpense(); recalcMonthlyFromLedger(); syncExpenseDeduction();
-    recompute(); renderCashTabBody();
+    rebuildMonthExpense(); recompute(); renderCashTabBody();
   });
 }
 function toggleFixed(id){
@@ -773,16 +749,13 @@ function deleteFixed(id){
   editingFixedId=null; renderCashTabBody();
 }
 
-// ==================== 收入引擎 ====================
+// ==================== 收入引擎（写进 Ledger，靠 key 防重复）====================
 function loadIncome(){
-  try{ return JSON.parse(localStorage.getItem('incomeConfig_v1')||'{"payroll":null,"lastPayDate":null}'); }
-  catch(e){ return {payroll:null,lastPayDate:null}; }
+  try{ return JSON.parse(localStorage.getItem('incomeConfig_v1')||'{"payroll":null}'); }
+  catch(e){ return {payroll:null}; }
 }
 function saveIncome(cfg){ localStorage.setItem('incomeConfig_v1', JSON.stringify(cfg)); }
-function addToChase(amt){
-  const c=chaseItem();
-  if(c){ c.mv=Math.round((c.mv||0)+amt); persistSimple('cash','cashList_v1'); }
-}
+
 function nextPayDate(d, freq){
   const n=new Date(d);
   if(freq==='weekly'){ n.setDate(n.getDate()+7); }
@@ -790,39 +763,42 @@ function nextPayDate(d, freq){
   else{ n.setDate(n.getDate()+14); }
   return n;
 }
-// 从起始日到今天，按频率应该发几次
-function payrollCount(start, freq, today){
-  let d=new Date(start+'T00:00:00');
-  if(d>today) return {n:0, last:null};
-  let n=1, last=new Date(d), guard=0;
-  while(guard++<2000){
-    const next=nextPayDate(last, freq);
-    if(next>today) break;
-    n++; last=next;
+// 从起始日推进，列出「已到且在最近 60 天内」的发薪日
+function payDatesDue(cfg){
+  const out=[];
+  const p=cfg&&cfg.payroll;
+  if(!p||!p.amount||!p.start) return out;
+  const today=todayD();
+  const floor=new Date(today); floor.setDate(floor.getDate()-60);
+  let d=dateOf(p.start), guard=0;
+  while(d<=today && guard++<400){
+    if(d>=floor) out.push(fmtD(d));
+    d=nextPayDate(d, p.freq||'biweekly');
   }
-  return {n:n, last:last};
+  return out;
 }
 function runPayroll(){
   const cfg=loadIncome();
-  if(!cfg.payroll || !cfg.payroll.amount || !cfg.payroll.start) return;
-  const amt=cfg.payroll.amount;
-  const freq=cfg.payroll.freq||'biweekly';
-  const today=new Date(); today.setHours(0,0,0,0);
-  let last=cfg.lastPayDate? new Date(cfg.lastPayDate+'T00:00:00') : null;
-  let paid=false;
-  if(!last){
-    const st=new Date(cfg.payroll.start+'T00:00:00');
-    if(st<=today){ addToChase(amt); cfg.paidTotal=(cfg.paidTotal||0)+amt; last=st; paid=true; }
-  }
-  if(last){
-    let guard=0;
-    while(guard++<2000){
-      const next=nextPayDate(last, freq);
-      if(next>today) break;
-      addToChase(amt); cfg.paidTotal=(cfg.paidTotal||0)+amt; last=next; paid=true;
-    }
-  }
-  if(paid){ cfg.lastPayDate=last.toISOString().slice(0,10); saveIncome(cfg); }
+  const p=cfg.payroll;
+  if(!p||!p.amount) return Promise.resolve();
+  const jobs=payDatesDue(cfg)
+    .map(function(ds){ return {ds:ds, key:'pay:'+ds}; })
+    .filter(function(j){ return !ledgerRows.some(function(r){ return (r.key||'')===j.key; }); });
+  if(!jobs.length) return Promise.resolve();
+  let chain=Promise.resolve();
+  jobs.forEach(function(j){
+    chain=chain.then(function(){
+      return apiWrite({action:'autoLedger', key:j.key, date:j.ds,
+                       category:'Income · Payroll', amount:p.amount, note:'工资'})
+        .then(function(res){
+          const nr={row:res&&res.row, date:j.ds, category:'Income · Payroll',
+                    amount:p.amount, note:'工资', key:j.key};
+          ledgerRows.push(nr);
+          if(res && res.status==='success') applyCashDelta(signedOf(nr));
+        });
+    });
+  });
+  return chain.then(function(){ rebuildMonthExpense(); recompute(); });
 }
 
 // ==================== 储蓄 / 国债 计息 · 到期事件 ====================
@@ -947,13 +923,13 @@ function rebuildEvents(){
 
 // ---- 入账 ----
 function addMoneyTo(dest, amt){
-  if(dest==='chase'){ addToChase(amt); }
+  if(dest==='chase'){ addToChase(amt, '国债利息'); }
   else{
     const m=marcusItem();
     if(m){
       m.mv=Math.round((m.mv||0)+amt);
       apiWrite({action:'adjustSaving', id:m.id, delta:Math.round(amt)}).then(refreshSavings);
-    }else{ addToChase(amt); }
+    }else{ addToChase(amt, '国债利息'); }
   }
 }
 function settleEvent(dest){
@@ -1699,10 +1675,9 @@ function applyBuy(){
   it.cost=(it.shares*it.cost + sh*px)/newShares;
   it.shares=newShares;
   it.price=px;
-  bc.mv=Math.round((bc.mv||0)-cost0); saveBrokerCash(bc.mv);
   afterStockChange();
   syncStockToSheet(it);
-  syncCashToSheet();
+  adjustBrokerCash(-cost0);
 }
 function applySell(){
   const it=stockItem();
@@ -1712,8 +1687,7 @@ function applySell(){
   const sym=normSym(it.sym);
   const sellPx=(px>0?px:it.price);
   const soldOut = (sh>=it.shares-1e-9);
-  const bc=brokerCashItem();
-  if(bc){ bc.mv=Math.round((bc.mv||0)+sh*sellPx); saveBrokerCash(bc.mv); }
+  const proceeds=sh*sellPx;
   if(soldOut){
     DATA.stock.groups[curStock.gi].holdings.splice(curStock.hi,1);
     afterStockChange();
@@ -1724,7 +1698,7 @@ function applySell(){
     afterStockChange();
     syncStockToSheet(it);
   }
-  syncCashToSheet();
+  adjustBrokerCash(proceeds);
 }
 function applyPrice(){
   const it=stockItem();
@@ -1777,12 +1751,9 @@ function applyDividend(){
   if(!(amt>0)){ alert('请输入分红金额'); return; }
   const bc=brokerCashItem();
   if(!bc){ alert('股票列表里找不到现金条目，无法入账'); return; }
-  bc.mv=Math.round((bc.mv||0)+amt);
-  saveBrokerCash(bc.mv);
-  persistStock();
   recompute();
   openDetail('stock', true);
-  syncCashToSheet();
+  adjustBrokerCash(amt);
   alert('已入账分红 $'+fmt(amt)+(from?(' · '+from):''));
 }
 
@@ -1840,7 +1811,6 @@ function submitBuyStock(){
   }else{
     g.holdings.push({sym:sym, shares:sh, cost:cost, price:cost, desc:SYM_DESC[sym]||''});
   }
-  bc.mv=Math.round((bc.mv||0)-need); saveBrokerCash(bc.mv);
   persistStock();
   recompute();
   openDetail('stock', true);
@@ -1850,11 +1820,11 @@ function submitBuyStock(){
     pushToSheet({action:'addStock', symbol:sym, category:sheetCat,
                  shares:Number(sh.toFixed(4)), cost:Number(cost.toFixed(4))});
   }
-  syncCashToSheet();
+  adjustBrokerCash(-need);
 }
 
 // ==================== HSA 简单编辑 ====================
-const SIMPLE_KEY={cash:'cashList_v1', hsa:'hsaList_v1'};
+const SIMPLE_KEY={hsa:'hsaList_v1'};
 let editingSimple={cls:null, idx:-1};
 function renderSimpleAdd(cls){
   const wrap=document.getElementById('simpleAddWrap');
@@ -1924,33 +1894,46 @@ function sourceBalance(key){
   const it=getSource(key);
   return it?(it.mv||0):0;
 }
-function deductSource(key, amt){
-  const it=getSource(key); if(!it) return;
-  it.mv=Math.max(0,Math.round((it.mv||0)-amt));
-  if(key==='chase'){ persistSimple('cash','cashList_v1'); }
-  if(key==='marcus'){
-    // Marcus 余额由 Apps Script 管：那边会先结息再扣，这里只是先让界面动起来
+// 转账：从 Chase 出去的钱记进 Ledger（Transfer 前缀，不算支出），
+// 从 Marcus 出去的由 Savings 引擎处理；到账端一律按增量写。
+function transferLabel(key){
+  return key==='broker'?'券商':key==='mortgage'?'房贷':key==='marcus'?'Marcus':key;
+}
+function deductSource(key, amt, tgtKey, dateStr, dedupeKey){
+  if(key==='chase'){
+    const ds=dateStr||fmtD(todayD());
+    const cat='Transfer · '+transferLabel(tgtKey);
+    const tmp={row:-Date.now(), date:ds, category:cat, amount:Math.round(amt*100)/100,
+               note:'', key:dedupeKey||''};
+    ledgerRows.push(tmp);
+    applyCashDelta(signedOf(tmp));
+    apiWrite(dedupeKey
+      ? {action:'autoLedger', key:dedupeKey, date:ds, category:cat, amount:tmp.amount, note:'定期转账'}
+      : {action:'addLedger', date:ds, category:cat, amount:tmp.amount, note:''}
+    ).then(function(res){ if(res&&res.status==='success') tmp.row=res.row; });
+  }else if(key==='marcus'){
+    const it=marcusItem(); if(!it) return;
+    it.mv=Math.max(0,Math.round((it.mv||0)-amt));
     apiWrite({action:'adjustSaving', id:it.id, delta:-Math.round(amt)}).then(refreshSavings);
   }
 }
 function addToTarget(key, amt){
   if(key==='broker'){
-    const bc=brokerCashItem();
-    const cur = bc? (bc.mv||0) : loadBrokerCash();
-    const next = Math.round(cur+amt);
-    if(bc) bc.mv=next;
-    saveBrokerCash(next);
-    persistStock();
-    syncCashToSheet();          // ★ 关键修复：写回 Sheet，否则下次同步会被覆盖
+    adjustBrokerCash(amt);
   }else if(key==='mortgage'){
     PROPERTY.loan=Math.max(0, Math.round((PROPERTY.loan!=null?PROPERTY.loan:amortizeNow())-amt));
-    PROPERTY.updated=new Date().toISOString().slice(0,10);
+    PROPERTY.updated=fmtD(todayD());
     persistProp();
+  }else if(key==='marcus'){
+    const it=marcusItem(); if(!it) return;
+    it.mv=Math.round((it.mv||0)+amt);
+    apiWrite({action:'adjustSaving', id:it.id, delta:Math.round(amt)}).then(refreshSavings);
   }
 }
-function doTransfer(srcKey, tgtKey, amt){
+function doTransfer(srcKey, tgtKey, amt, dateStr, dedupeKey){
   if(!(amt>0)) return;
-  deductSource(srcKey, amt);
+  if(srcKey===tgtKey) return;
+  deductSource(srcKey, amt, tgtKey, dateStr, dedupeKey);
   addToTarget(tgtKey, amt);
 }
 
@@ -1979,6 +1962,11 @@ function migrateRecurring(r){
   delete r.startYm;
   return true;
 }
+// 每次自动转账带一个唯一 key，即使本地执行状态丢失也不会重复转
+function xferKey(r, d){
+  if(!r.id){ r.id='x'+Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
+  return 'xfer:'+r.id+':'+fmtD(d);
+}
 function runRecurring(){
   const list=loadRecurring();
   const today=todayD();
@@ -1990,13 +1978,13 @@ function runRecurring(){
     let last=r.lastRun?dateOf(r.lastRun):null;
     if(!last){
       const st=dateOf(r.start);
-      if(st<=today){ doTransfer(r.src, r.tgt, r.amt); last=st; }
+      if(st<=today){ doTransfer(r.src, r.tgt, r.amt, fmtD(st), xferKey(r, st)); last=st; }
     }
     if(last){
       let guard=0;
       while(guard++<400){
         const nx=nextByFreq(last, freq);
-        if(nx<=today){ doTransfer(r.src, r.tgt, r.amt); last=nx; } else break;
+        if(nx<=today){ doTransfer(r.src, r.tgt, r.amt, fmtD(nx), xferKey(r, nx)); last=nx; } else break;
       }
       const ds=fmtD(last);
       if(r.lastRun!==ds){ r.lastRun=ds; changed=true; }
@@ -2007,7 +1995,7 @@ function runRecurring(){
 
 // ==================== 转账页 ====================
 const SRC_OPTS=[{k:'chase',n:'Checking - Chase'},{k:'marcus',n:'Marcus OS-9250'}];
-const TGT_OPTS=[{k:'broker',n:'股票账户现金'},{k:'mortgage',n:'房贷（还款）'}];
+const TGT_OPTS=[{k:'broker',n:'股票账户现金'},{k:'mortgage',n:'房贷（还款）'},{k:'marcus',n:'Marcus 活期 OS'}];
 function optName(list,k){ const o=list.find(x=>x.k===k); return o?o.n:k; }
 function openTransfer(){ renderTransfer(); go('transfer'); }
 function renderTransfer(){
@@ -2134,8 +2122,15 @@ function renderCashTabBody(){
             '<div class="qty" style="color:#4F5D7A">一次性手动</div></div>'+
           '<div class="val"><div class="pc" style="color:#4F5D7A">+ 添加</div></div></div>'+
       '</div>'+
+      (cashInfo.hasAnchor?'':
+        '<div style="margin-top:12px;padding:11px 13px;background:#fbf1d9;border-radius:12px;'+
+        'font-size:12px;color:#8a6d16;line-height:1.5">还没有设过起算余额，流动现金暂时显示为 $0。'+
+        '<br>点下面的「对账」填入银行 App 上的真实余额，从此自动计算。</div>')+
       '<div id="incomeFormWrap"></div>'+
-      '<button style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:14px;background:var(--card);color:var(--ink-2);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="showChaseCashForm()">手动修改现金余额</button>';
+      '<div style="display:flex;gap:10px;margin-top:12px">'+
+        '<button style="flex:1;padding:13px;border:none;border-radius:14px;background:var(--cash-bg);color:var(--cash);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="showReconcileForm()">对账</button>'+
+        '<button style="flex:1;padding:13px;border:none;border-radius:14px;background:#F8CCD8;color:#B86A78;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="recalcHistory()">重算历史</button>'+
+      '</div>';
   }else if(expenseDrill){
     renderExpenseDrill(body);
   }else{
@@ -2259,8 +2254,6 @@ function readLedgerForm(){
 function applyLocal(fn){
   fn();
   rebuildMonthExpense();
-  recalcMonthlyFromLedger();
-  syncExpenseDeduction();
   recompute();
   renderCashTabBody();
 }
@@ -2273,11 +2266,12 @@ function saveLedgerAdd(){
   if(!v.date || !(v.amount>0)){ alert('请填写日期和金额'); return; }
   const tmp={row:-Date.now(), date:v.date, category:v.category,
              amount:v.amount, note:v.note, key:'', pending:true};
-  applyLocal(function(){ ledgerRows.push(tmp); });
+  applyLocal(function(){ ledgerRows.push(tmp); applyCashDelta(signedOf(tmp)); });
   apiWrite({action:'addLedger', date:v.date, category:v.category, amount:v.amount, note:v.note})
     .then(function(res){
       if(res && res.status==='success'){ tmp.row=res.row; tmp.pending=false; renderCashTabBody(); }
-      else{ applyLocal(function(){ ledgerRows=ledgerRows.filter(function(x){ return x!==tmp; }); });
+      else{ applyLocal(function(){ ledgerRows=ledgerRows.filter(function(x){ return x!==tmp; });
+                                   applyCashDelta(-signedOf(tmp)); });
             writeFailed(res,'补记'); }
     });
 }
@@ -2289,12 +2283,18 @@ function saveLedgerEdit(row, expectAmount){
   if(!r) return;
   const backup=Object.assign({}, r);
   editingLedgerRow=null;
-  applyLocal(function(){ r.date=v.date; r.category=v.category; r.amount=v.amount; r.note=v.note; });
+  applyLocal(function(){
+    const oldSigned=signedOf(r);
+    r.date=v.date; r.category=v.category; r.amount=v.amount; r.note=v.note;
+    applyCashDelta(signedOf(r)-oldSigned);
+  });
   apiWrite({action:'updateLedger', row:row, expectAmount:expectAmount,
             date:v.date, category:v.category, amount:v.amount, note:v.note})
     .then(function(res){
       if(!(res && res.status==='success')){
-        applyLocal(function(){ Object.assign(r, backup); });
+        applyLocal(function(){
+          const cur=signedOf(r); Object.assign(r, backup); applyCashDelta(signedOf(r)-cur);
+        });
         writeFailed(res,'修改');
       }
     });
@@ -2306,7 +2306,7 @@ function deleteLedgerRow(row, expectAmount){
   if(idx<0) return;
   const backup=ledgerRows[idx];
   editingLedgerRow=null;
-  applyLocal(function(){ ledgerRows.splice(idx,1); });
+  applyLocal(function(){ ledgerRows.splice(idx,1); applyCashDelta(-signedOf(backup)); });
   apiWrite({action:'deleteLedger', row:row, expectAmount:expectAmount})
     .then(function(res){
       if(res && res.status==='success'){
@@ -2314,7 +2314,7 @@ function deleteLedgerRow(row, expectAmount){
         ledgerRows.forEach(function(x){ if(x.row>row) x.row--; });
         renderCashTabBody();
       }else{
-        applyLocal(function(){ ledgerRows.splice(idx,0,backup); });
+        applyLocal(function(){ ledgerRows.splice(idx,0,backup); applyCashDelta(signedOf(backup)); });
         writeFailed(res,'删除');
       }
     });
@@ -2348,29 +2348,11 @@ function savePayroll(){
   const freq=document.getElementById('pay-freq').value;
   if(!(amt>0)||!start){ alert('请填写金额和日期'); return; }
   const cfg=loadIncome();
-  const today=new Date(); today.setHours(0,0,0,0);
-  const startD=new Date(start+'T00:00:00');
   cfg.payroll={amount:Math.round(amt), start:start, freq:freq};
-  if(startD>today){
-    // 起始日在未来：现金不动，到点了再按新设置发
-    cfg.lastPayDate=null;
-    saveIncome(cfg);
-  }else{
-    // 起始日在过去：算出「按新设置到今天本应入账多少」，只补差额，不重复发放
-    const r=payrollCount(start, freq, today);
-    const should=r.n*Math.round(amt);
-    const already=cfg.paidTotal||0;
-    const delta=should-already;
-    if(Math.abs(delta)>0.5){
-      addToChase(delta);
-      alert((delta>0?'已补入 $':'已扣回 $')+fmt(Math.abs(delta))+'\n（按新设置应发 $'+fmt(should)+'，此前已入账 $'+fmt(already)+'）');
-    }
-    cfg.paidTotal=should;
-    cfg.lastPayDate=r.last?r.last.toISOString().slice(0,10):null;
-    saveIncome(cfg);
-  }
-  recompute();
-  openDetail('cash', true);
+  delete cfg.paidTotal; delete cfg.lastPayDate;   // 旧版遗留字段，不再需要
+  saveIncome(cfg);
+  // 每个发薪日都是 Ledger 里的一行，带 pay:日期 的 key，重复写入会被服务器拦掉
+  runPayroll().then(function(){ openDetail('cash', true); });
 }
 function showBonusForm(){
   document.getElementById('incomeFormWrap').innerHTML=
@@ -2386,33 +2368,85 @@ function showBonusForm(){
 function saveBonus(){
   const amt=parseFloat(document.getElementById('bonus-amt').value);
   if(!(amt>0)){ alert('请输入金额'); return; }
-  addToChase(Math.round(amt));
-  recompute();
+  const today=fmtD(todayD());
+  const tmp={row:-Date.now(), date:today, category:'Income · Bonus',
+             amount:Math.round(amt), note:'', key:''};
+  applyLocal(function(){ ledgerRows.push(tmp); applyCashDelta(signedOf(tmp)); });
   openDetail('cash', true);
-  alert('已入账 Bonus $'+fmt(amt));
+  apiWrite({action:'addLedger', date:today, category:'Income · Bonus', amount:Math.round(amt), note:''})
+    .then(function(res){
+      if(res && res.status==='success'){ tmp.row=res.row; }
+      else{ applyLocal(function(){ ledgerRows=ledgerRows.filter(x=>x!==tmp); applyCashDelta(-signedOf(tmp)); });
+            writeFailed(res,'Bonus 入账'); }
+    });
 }
-function showChaseCashForm(){
-  const item=chaseItem();
-  const cur=item?item.mv:0;
-  document.getElementById('incomeFormWrap').innerHTML=
+function showReconcileForm(){
+  const wrap=document.getElementById('incomeFormWrap');
+  if(!wrap) return;
+  if(wrap.innerHTML){ wrap.innerHTML=''; return; }
+  const st='width:100%;border:1px solid var(--line);border-radius:10px;background:#fafbfc;'+
+    'padding:11px 12px;font-size:16px;color:var(--ink);font-family:inherit;-webkit-appearance:none';
+  wrap.innerHTML=
     '<div class="editform" style="border-color:var(--cash-ln)">'+
-      '<div class="fld"><label>Chase 现金余额 ($)</label>'+
-        '<input id="chase-amt" type="number" inputmode="decimal" value="'+cur+'"></div>'+
-      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">这是自动收支的基准值，建议每月对一次账</div>'+
+      '<div style="font-size:12px;color:var(--ink-2);margin-bottom:12px">'+
+        '按流水算出来是 <b>$'+fmt(cashInfo.balance)+'</b>'+
+        (cashInfo.anchorDate?('　·　上次对账 '+cashInfo.anchorDate.replace(/-/g,'/')):'　·　还没对过账')+'</div>'+
+      '<div class="fld"><label>银行 App 上的真实余额 ($)</label>'+
+        '<input id="rc-amt" type="number" inputmode="decimal" placeholder="例：9450" oninput="updateReconcileDiff()"></div>'+
+      '<div id="rc-diff" style="font-size:12px;color:var(--ink-faint);margin-bottom:12px">输入后显示差额</div>'+
+      '<div class="fld"><label>差额怎么处理</label>'+
+        '<select id="rc-mode" style="'+st+'" onchange="updateReconcileDiff()">'+
+          '<option value="adjust">只调余额（信用卡时间差等）</option>'+
+          '<option value="expense">记为一笔支出</option>'+
+          '<option value="income">记为一笔收入</option>'+
+        '</select></div>'+
+      '<div class="fld" id="rc-catwrap" style="display:none"><label>归入分类</label>'+
+        '<select id="rc-cat" style="'+st+'">'+
+          EXP_CATS.map(function(c){ return '<option value="'+c+'"'+(c==='Other or unexpected'?' selected':'')+'>'+c+'</option>'; }).join('')+
+        '</select></div>'+
       '<div class="btns">'+
         '<button class="cancel" onclick="document.getElementById(\'incomeFormWrap\').innerHTML=\'\'">取消</button>'+
-        '<button class="save" style="background:var(--cash)" onclick="saveChaseCash()">保存</button>'+
+        '<button class="save" style="background:var(--cash)" onclick="submitReconcile()">确认对账</button>'+
       '</div></div>';
-  document.getElementById('chase-amt').focus();
+  document.getElementById('rc-amt').focus();
 }
-function saveChaseCash(){
-  const n=parseFloat(document.getElementById('chase-amt').value);
-  if(!(n>=0)){ alert('请输入有效金额'); return; }
-  const item=chaseItem();
-  if(item){ item.mv=Math.round(n); }
-  persistSimple('cash','cashList_v1');
-  recompute();
-  openDetail('cash', true);
+function updateReconcileDiff(){
+  const v=parseFloat(document.getElementById('rc-amt').value);
+  const el=document.getElementById('rc-diff');
+  const mode=document.getElementById('rc-mode').value;
+  document.getElementById('rc-catwrap').style.display=(mode==='expense')?'':'none';
+  if(!isFinite(v)){ el.textContent='输入后显示差额'; el.style.color='var(--ink-faint)'; return; }
+  const diff=Math.round((v-cashInfo.balance)*100)/100;
+  if(Math.abs(diff)<0.005){ el.textContent='刚好对上，没有差额'; el.style.color='var(--pos)'; return; }
+  el.textContent='差额 '+(diff>0?'+':'')+'$'+diff.toFixed(2)+(diff<0?'（实际比账面少）':'（实际比账面多）');
+  el.style.color=diff<0?'var(--neg)':'var(--pos)';
+}
+function submitReconcile(){
+  const v=parseFloat(document.getElementById('rc-amt').value);
+  if(!isFinite(v)||v<0){ alert('请输入有效余额'); return; }
+  const mode=document.getElementById('rc-mode').value;
+  const cat=(mode==='expense')?document.getElementById('rc-cat').value:'Income · 调整';
+  document.getElementById('incomeFormWrap').innerHTML='';
+  apiWrite({action:'reconcile', balance:v, mode:mode, category:cat})
+    .then(function(res){
+      if(res && res.status==='success'){
+        return syncStockFromSheet().then(function(){
+          alert('已对账。差额 '+(res.diff>=0?'+':'')+'$'+Number(res.diff||0).toFixed(2)+
+                (mode==='adjust'?'（只调了余额）':'（已补记一笔）'));
+        });
+      }
+      alert('对账失败：'+((res&&res.message)||'未知原因'));
+    });
+}
+function recalcHistory(){
+  if(!confirm('重新扫一遍全部流水，刷新每月汇总和月末余额？\n手动改过旧账之后用。')) return;
+  setSyncBadge('loading');
+  apiWrite({action:'recalc'}).then(function(res){
+    if(res && res.status==='success'){
+      return syncStockFromSheet().then(function(){ alert('历史已重算'); });
+    }
+    alert('重算失败：'+((res&&res.message)||'未知原因'));
+  });
 }
 
 // ==================== 导航 ====================
