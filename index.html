@@ -407,6 +407,7 @@ function rebuildMonthExpense(){
   const ym=curYm(); const m={};
   ledgerRows.forEach(function(r){
     if((r.date||'').slice(0,7)!==ym) return;
+    if(catKind(r.category)!=='expense') return;   // 收入、转账不算支出
     const cat=(r.category||'UNCATEGORIZED').trim();
     m[cat]=(m[cat]||0)+(parseFloat(r.amount)||0);
   });
@@ -2111,7 +2112,22 @@ function renderCashTabBody(){
     const cfg=loadIncome(); const p=cfg.payroll;
     const freqLabel={weekly:'每周',biweekly:'每两周',monthly:'每月'};
     const payrollLine = p&&p.amount ? ('已设：'+(freqLabel[p.freq]||'每两周')+' $'+fmt(p.amount)) : '未设置';
+    const mt=(monthlyTotals||{})[curYm()]||{};
+    const inSum=mt.income||0, exSum=mt.expense||0, tfSum=mt.transfer||0;
+    const net=inSum-exSum-tfSum;
     body.innerHTML=
+      '<div style="display:flex;gap:8px;margin-bottom:12px">'+
+        '<div style="flex:1;background:var(--cash-bg);border-radius:14px;padding:11px 12px">'+
+          '<div style="font-size:11px;color:var(--ink-2)">本月收入</div>'+
+          '<div class="num" style="font-size:17px;font-weight:650;color:var(--ink)">$'+fmt(inSum)+'</div></div>'+
+        '<div style="flex:1;background:#F8CCD8;border-radius:14px;padding:11px 12px">'+
+          '<div style="font-size:11px;color:#B86A78">本月支出</div>'+
+          '<div class="num" style="font-size:17px;font-weight:650;color:var(--ink)">$'+fmt(exSum)+'</div></div>'+
+        '<div style="flex:1;background:var(--card);border-radius:14px;padding:11px 12px">'+
+          '<div style="font-size:11px;color:var(--ink-2)">净流入</div>'+
+          '<div class="num" style="font-size:17px;font-weight:650;color:'+(net>=0?'var(--pos)':'var(--neg)')+'">'+
+            (net>=0?'+':'−')+'$'+fmt(Math.abs(net))+'</div></div>'+
+      '</div>'+
       '<div class="group" style="background:#ECEEE1;border:none">'+
         '<div class="row" style="border-color:rgba(0,0,0,.05);cursor:pointer" onclick="showPayrollForm()">'+
           '<div class="tk" style="width:auto;flex:1"><div class="sym" style="color:#4F5D7A">Payroll</div>'+
@@ -2174,6 +2190,7 @@ function drillRows(){
   return ledgerRows.filter(function(r){
     if((r.date||'').slice(0,7)!==ym) return false;
     if(expenseDrill==='__ALL__') return true;
+    if(catKind(r.category)!=='expense') return false;
     return matchCat(r.category)===expenseDrill;
   }).sort(function(a,b){ return (a.date<b.date?1:a.date>b.date?-1:b.row-a.row); });
 }
@@ -2198,7 +2215,8 @@ function renderExpenseDrill(body){
           '<div class="sym" style="font-size:13px">'+(r.note||r.category)+(isFix?' · 固定':'')+'</div>'+
           '<div class="qty">'+(r.date||'').replace(/-/g,'/')+(expenseDrill==='__ALL__'?(' · '+r.category):'')+'</div>'+
         '</div>'+
-        '<div class="val"><div class="mv">$'+(parseFloat(r.amount)||0).toFixed(2)+'</div></div></div>'+
+        '<div class="val"><div class="mv" style="color:'+(catKind(r.category)==='income'?'var(--pos)':'var(--ink)')+'">'+
+          (catKind(r.category)==='income'?'+':'−')+'$'+(parseFloat(r.amount)||0).toFixed(2)+'</div></div></div>'+
       '<div class="stock-slot" id="lg-'+r.row+'"></div>';
     }).join('')+'</div>';
   }
