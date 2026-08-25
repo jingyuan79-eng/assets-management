@@ -557,6 +557,12 @@ function catKind(cat){
 function catSign(cat){ const k=catKind(cat); return (k==='income'||k==='redeem')?1:-1; }
 function signedOf(r){ return catSign(r.category)*(parseFloat(r.amount)||0); }
 
+// 记账起始日之前的账都已含在初始余额里，不补录
+function bookFloor(){
+  const d60=new Date(todayD()); d60.setDate(d60.getDate()-60);
+  const bs=cashInfo && cashInfo.bookStart ? dateOf(cashInfo.bookStart) : null;
+  return (bs && bs>d60) ? bs : d60;
+}
 function applyCashDelta(d){
   cashInfo.balance = Math.round((cashInfo.balance + d)*100)/100;
   const c=chaseItem();
@@ -764,7 +770,7 @@ function payDatesDue(cfg){
   const p=cfg&&cfg.payroll;
   if(!p||!p.amount||!p.start) return out;
   const today=todayD();
-  const floor=new Date(today); floor.setDate(floor.getDate()-60);
+  const floor=bookFloor();
   let d=dateOf(p.start), guard=0;
   while(d<=today && guard++<400){
     if(d>=floor) out.push(fmtD(d));
@@ -1265,7 +1271,7 @@ function cdFormHtml(vals, isEdit){
         '</select></div>')+
       '<div class="btns">'+
         '<button class="cancel" onclick="renderCdAdd()">取消</button>'+
-        '<button class="save" onclick="saveCd()">保存</button>'+
+        '<button class="save" onclick="saveCd(event)">保存</button>'+
       '</div>'+
       (isEdit?'<div class="delrow"><button class="danger" style="width:100%;border-radius:10px;padding:12px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="deleteCd('+editingCdIndex+')">删除这个账户</button></div>':'')+
     '</div>';
@@ -1282,12 +1288,17 @@ function editCd(i){
   wrap.innerHTML=cdFormHtml({sym:item.sym, mv:item.mv, rate:item.rate, mat:item.mat, type:item.type}, true);
   wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
-function saveCd(){
+let savingCd=false;
+function saveCd(ev){
+  if(savingCd) return;
+  const btn=(ev&&ev.target)||document.querySelector('#cdAddWrap .save');
   const name=document.getElementById('f-name').value.trim();
   const mv=parseFloat(document.getElementById('f-mv').value);
   const rate=parseFloat(document.getElementById('f-rate').value)||0;
   const mat=document.getElementById('f-mat').value;
   if(!name || !(mv>0)){ alert('请至少填写账户名和金额'); return; }
+  savingCd=true; setBusy(btn, true);
+  const doneCd=function(){ savingCd=false; setBusy(btn, false); };
 
   if(editingCdIndex>=0){
     const it=DATA.cd.groups[0].holdings[editingCdIndex];
@@ -1299,6 +1310,7 @@ function saveCd(){
     it.sym=name; it.rate=rate; it.mat=mat; it.mv=Math.round(mv);
     recompute(); openDetail('cd', true);
     apiWrite(payload).then(function(res){
+      doneCd();
       if(res && res.status==='success') refreshFromSheet();
       else alert('保存失败：'+((res&&res.message)||'未知原因'));
     });
@@ -1309,6 +1321,7 @@ function saveCd(){
     const src=(srcKey==='marcus')?marcusItem():null;
     apiWrite({action:'addSaving', name:name, type:type, balance:mv, rate:rate,
               maturity:mat, srcId:src?src.id:''}).then(function(res){
+      doneCd();
       if(res && res.status==='success'){
         if(srcKey==='chase'){ deductSource('chase', Math.round(mv)); }
         refreshFromSheet();
@@ -1388,7 +1401,7 @@ function bondFormHtml(vals, isEdit){
       '</select></div>')+
     '<div class="btns">'+
       '<button class="cancel" onclick="renderBondAdd()">取消</button>'+
-      '<button class="save" style="background:var(--bond)" onclick="saveBond()">保存</button>'+
+      '<button class="save" style="background:var(--bond)" onclick="saveBond(event)">保存</button>'+
     '</div>'+
     (isEdit?'<div class="delrow"><button class="danger" style="width:100%;border-radius:10px;padding:12px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="deleteBond('+editingBondIndex+')">删除这笔国债</button></div>':'')+
     '</div>';
@@ -1418,7 +1431,17 @@ function editBond(i){
     baseMv:item.principal, bal:item.mv, rate:item.rate}, true);
   wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
-function saveBond(){
+let savingBond=false;
+function setBusy(btn, on, label){
+  if(!btn) return;
+  btn.disabled=on;
+  btn.style.opacity=on?'.55':'';
+  if(on){ btn._t=btn.textContent; btn.textContent=label||'保存中…'; }
+  else if(btn._t){ btn.textContent=btn._t; }
+}
+function saveBond(ev){
+  if(savingBond) return;
+  const btn=(ev&&ev.target)||document.querySelector('#bondAddWrap .save');
   const btype=document.getElementById('b-type').value;
   const start=document.getElementById('b-start').value;
   const term=document.getElementById('b-term').value;
@@ -1427,6 +1450,8 @@ function saveBond(){
   const balEl=document.getElementById('b-bal');
   if(!start || !(mv>0)){ alert('请填写起始日和金额'); return; }
   const name=btype+' '+term+'Y';
+  savingBond=true; setBusy(btn, true);
+  const done=function(){ savingBond=false; setBusy(btn, false); };
 
   if(editingBondIndex>=0){
     const it=DATA.bond.groups[0].holdings[editingBondIndex];
@@ -1440,6 +1465,7 @@ function saveBond(){
     if(payload.balance!=null) it.mv=Math.round(payload.balance);
     recompute(); openDetail('bond', true);
     apiWrite(payload).then(function(res){
+      done();
       if(res && res.status==='success') refreshFromSheet();
       else alert('保存失败：'+((res&&res.message)||'未知原因'));
     });
@@ -1449,6 +1475,7 @@ function saveBond(){
     const src=(srcKey==='marcus')?marcusItem():null;
     apiWrite({action:'addBond', name:name, type:btype, start:start, term:term,
               rate:rate, principal:mv, srcId:src?src.id:''}).then(function(res){
+      done();
       if(res && res.status==='success'){
         if(srcKey==='chase'){ deductSource('chase', Math.round(mv), 'bond'); }
         refreshFromSheet();
