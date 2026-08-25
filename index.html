@@ -842,14 +842,26 @@ function rebuildBonds(rows){
       const lp=dateOf(r.lastPost);
       nextPost=fmtD(new Date(lp.getFullYear(), lp.getMonth()+6, lp.getDate()));
     }
-    const showNext=(r.type==='T-Note' && nextPost && nextPost<=mat);
+    const bal=parseFloat(r.balance)||0;
+    const prin=parseFloat(r.principal)||0;
+    // 下一次入息：金额 + 日期。到期日之后就不再有下一次。
+    let nextTxt='';
+    if(nextPost && nextPost<=mat){
+      let amt=0;
+      if(r.type==='T-Note') amt=prin*rate/2;          // 半年息，打进流动现金
+      else if(r.type==='I-Bond') amt=bal*rate/2;      // 半年复利，滚进本金
+      if(amt>0) nextTxt='Next payment $'+amt.toFixed(2)+' @ '+nextPost.replace(/-/g,'/');
+    }
+    if(!nextTxt && r.type==='T-Bill'){
+      const gain=prin*rate*(parseFloat(r.term)||1);
+      if(gain>0) nextTxt='Next payment $'+gain.toFixed(2)+' @ '+mat.replace(/-/g,'/');
+    }
+    if(!nextTxt && mat) nextTxt='到期 '+mat.replace(/-/g,'/');
     return {
       id:r.id, sym:r.name, btype:r.type, start:(r.start||'').slice(0,10), term:r.term,
-      rate:ratePc, principal:parseFloat(r.principal)||0,
-      mv:Math.round(parseFloat(r.balance)||0), mat:mat, noprice:true,
+      rate:ratePc, principal:prin, mv:Math.round(bal), mat:mat, noprice:true,
       qty:(ratePc?ratePc.toFixed(2).replace(/\.?0+$/,'')+'%':''),
-      desc:r.type+' · 到期 '+mat.replace(/-/g,'/')+
-           (showNext?('  ·  下次付息 '+nextPost.replace(/-/g,'/')):'')
+      desc:nextTxt
     };
   });
 }
@@ -1105,10 +1117,14 @@ function openDetail(k, keepScroll){
           '<div class="stock-slot" id="slot-'+gi+'-'+hi+'"></div>';
       }
       // 无价条目
+      // 国债右下角显示到期日而不是占比（占比对单笔国债没意义）
+      var sub = (k==='bond' && hh.mat)
+        ? hh.mat.replace(/-/g,'/')
+        : (hmv(hh)/safeT*100).toFixed(1)+'%';
       var inner='<div class="tk"><div class="sym">'+hh.sym+'</div><div class="qty">'+(hh.qty||'')+'</div></div>'+
         '<div class="desc">'+(hh.desc||'')+'</div>'+
         '<div class="val"><div class="mv">$'+fmt(hmv(hh))+'</div>'+
-        '<div class="pc">'+(hmv(hh)/safeT*100).toFixed(1)+'%</div></div>';
+        '<div class="pc">'+sub+'</div></div>';
       if(k==='cd' || k==='bond'){
         var editFn = k==='cd'?'editCd':'editBond';
         return '<div class="row" style="cursor:pointer" onclick="'+editFn+'('+hi+')">'+inner+'</div>';
@@ -1311,21 +1327,32 @@ function saveCd(ev){
     recompute(); openDetail('cd', true);
     apiWrite(payload).then(function(res){
       doneCd();
-      if(res && res.status==='success') refreshFromSheet();
-      else alert('保存失败：'+((res&&res.message)||'未知原因'));
+      if(res && res.status==='success'){
+        if(res.savings) rebuildSavings(res.savings);
+        recompute(); openDetail('cd', true);
+      }else alert('保存失败：'+((res&&res.message)||'未知原因'));
     });
   }else{
     const srcEl=document.getElementById('f-src');
     const srcKey=srcEl?srcEl.value:'';
     const type=(document.getElementById('f-type')||{}).value||'CD';
     const src=(srcKey==='marcus')?marcusItem():null;
+    const tmpCd={id:'tmp'+Date.now(), sym:name, type:type, mv:Math.round(mv), rate:rate,
+                 mat:mat, noprice:true, qty:rate?rate+'%':'', desc:'保存中…', pending:true};
+    DATA.cd.groups[0].holdings.push(tmpCd);
+    recompute(); openDetail('cd', true);
     apiWrite({action:'addSaving', name:name, type:type, balance:mv, rate:rate,
               maturity:mat, srcId:src?src.id:''}).then(function(res){
       doneCd();
       if(res && res.status==='success'){
-        if(srcKey==='chase'){ deductSource('chase', Math.round(mv)); }
-        refreshFromSheet();
-      }else alert('新增失败：'+((res&&res.message)||'未知原因'));
+        if(res.savings) rebuildSavings(res.savings);
+        if(srcKey==='chase'){ deductSource('chase', Math.round(mv), 'marcus'); }
+        recompute(); openDetail('cd', true);
+      }else{
+        DATA.cd.groups[0].holdings=DATA.cd.groups[0].holdings.filter(x=>x!==tmpCd);
+        recompute(); openDetail('cd', true);
+        alert('新增失败：'+((res&&res.message)||'未知原因'));
+      }
     });
   }
 }
@@ -1337,7 +1364,8 @@ function deleteCd(i){
   DATA.cd.groups[0].holdings.splice(i,1);
   recompute(); openDetail('cd', true);
   apiWrite({action:'deleteSaving', id:item.id}).then(function(res){
-    if(!(res && res.status==='success')){ alert('删除失败，正在恢复'); refreshFromSheet(); }
+    if(res && res.status==='success'){ if(res.savings){ rebuildSavings(res.savings); recompute(); } }
+    else{ alert('删除失败，正在恢复'); refreshFromSheet(); }
   });
 }
 // 重新拉一次 Savings（写操作之后用，拿 Apps Script 算好的权威值）
@@ -1466,20 +1494,34 @@ function saveBond(ev){
     recompute(); openDetail('bond', true);
     apiWrite(payload).then(function(res){
       done();
-      if(res && res.status==='success') refreshFromSheet();
-      else alert('保存失败：'+((res&&res.message)||'未知原因'));
+      if(res && res.status==='success'){
+        if(res.bond) rebuildBonds(res.bond);
+        recompute(); openDetail('bond', true);
+      }else alert('保存失败：'+((res&&res.message)||'未知原因'));
     });
   }else{
     const srcEl=document.getElementById('b-src');
     const srcKey=srcEl?srcEl.value:'';
     const src=(srcKey==='marcus')?marcusItem():null;
+    // 本地先插一条占位，界面立刻有反馈
+    const tmp={id:'tmp'+Date.now(), sym:name, btype:btype, start:start, term:term,
+               rate:rate, principal:mv, mv:Math.round(mv), noprice:true,
+               mat:calcMaturity(start,term), qty:rate?rate+'%':'', desc:'保存中…', pending:true};
+    DATA.bond.groups[0].holdings.push(tmp);
+    recompute(); openDetail('bond', true);
     apiWrite({action:'addBond', name:name, type:btype, start:start, term:term,
               rate:rate, principal:mv, srcId:src?src.id:''}).then(function(res){
       done();
       if(res && res.status==='success'){
+        if(res.bond) rebuildBonds(res.bond);       // 直接用返回值，省一次往返
         if(srcKey==='chase'){ deductSource('chase', Math.round(mv), 'bond'); }
-        refreshFromSheet();
-      }else alert('新增失败：'+((res&&res.message)||'未知原因'));
+        if(srcKey==='marcus') refreshFromSheet();  // 储蓄余额变了才需要重拉
+        recompute(); openDetail('bond', true);
+      }else{
+        DATA.bond.groups[0].holdings=DATA.bond.groups[0].holdings.filter(x=>x!==tmp);
+        recompute(); openDetail('bond', true);
+        alert('新增失败：'+((res&&res.message)||'未知原因'));
+      }
     });
   }
 }
@@ -1491,7 +1533,8 @@ function deleteBond(i){
   DATA.bond.groups[0].holdings.splice(i,1);
   recompute(); openDetail('bond', true);
   apiWrite({action:'deleteBond', id:item.id}).then(function(res){
-    if(!(res && res.status==='success')){ alert('删除失败，正在恢复'); refreshFromSheet(); }
+    if(res && res.status==='success'){ if(res.bond){ rebuildBonds(res.bond); recompute(); } }
+    else{ alert('删除失败，正在恢复'); refreshFromSheet(); }
   });
 }
 
