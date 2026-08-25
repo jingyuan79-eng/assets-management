@@ -333,7 +333,8 @@ const SYM_DESC = {
 // ==================== localStorage ====================
 // 清掉历史遗留的键（储蓄已迁到 Sheet，不再本地存）
 function cleanLegacyKeys(){
-  ['assetAdditions','cdList','bondList','cdList_v3','cashList_v1','expenseDeducted_v1','expenseDeducted_v2'].forEach(function(k){
+  ['assetAdditions','cdList','bondList','bondList_v2','cdList_v3','cashList_v1',
+   'expenseDeducted_v1','expenseDeducted_v2'].forEach(function(k){
     try{ localStorage.removeItem(k); }catch(e){}
   });
 }
@@ -365,15 +366,6 @@ function loadSimple(cls, key){
 }
 function persistSimple(cls, key){ localStorage.setItem(key, JSON.stringify(DATA[cls].groups[0].holdings)); }
 
-function loadBond(){
-  try{
-    localStorage.removeItem('bondList');
-    const raw = localStorage.getItem('bondList_v2');
-    if(raw){ DATA.bond.groups[0].holdings = JSON.parse(raw); }
-    else{ localStorage.setItem('bondList_v2', JSON.stringify(DATA.bond.groups[0].holdings)); }
-  }catch(e){ console.log('bond load err',e); }
-}
-function persistBond(){ localStorage.setItem('bondList_v2', JSON.stringify(DATA.bond.groups[0].holdings)); }
 
 cleanLegacyKeys(); loadStock(); loadSimple('hsa','hsaList_v1');
 
@@ -488,6 +480,7 @@ function syncStockFromSheet(){
       ledgerMonths = data.ledgerMonths || [];
       setCashFromServer(data.cash);
       rebuildSavings(data.savings);
+      rebuildBonds(data.bond);
       notices = data.notices || [];
       syncOk = true;
       // 固定支出：把本月该记的自动写进 Ledger（Sheet 端按 key 去重）
@@ -556,11 +549,12 @@ let cashInfo = { balance:0, anchorDate:'', anchorAmount:0, hasAnchor:false };
 
 function catKind(cat){
   const c=(cat||'').toString().trim();
-  if(c.indexOf('Income')===0) return 'income';
+  if(c.indexOf('Income')===0) return 'income';    // 真收入：工资、利息、分红
+  if(c.indexOf('Redeem')===0) return 'redeem';    // 本金回流：加现金但不算收入
   if(c.indexOf('Transfer')===0) return 'transfer';
   return 'expense';
 }
-function catSign(cat){ return catKind(cat)==='income' ? 1 : -1; }
+function catSign(cat){ const k=catKind(cat); return (k==='income'||k==='redeem')?1:-1; }
 function signedOf(r){ return catSign(r.category)*(parseFloat(r.amount)||0); }
 
 function applyCashDelta(d){
@@ -802,172 +796,63 @@ function runPayroll(){
   return chain.then(function(){ rebuildMonthExpense(); recompute(); });
 }
 
-// ==================== 储蓄 / 国债 计息 · 到期事件 ====================
-// 待处理事件（到期本金、半年息）。不在这里改状态——只有你在弹窗里选了去向，
-// 才会真正入账并推进 lastCoupon / 删除到期条目。没答就下次再问，绝不会丢。
-let pendingEvents = [];
-
+// ==================== 储蓄 / 国债：全部由 Apps Script 计算 ====================
 function todayD(){ const d=new Date(); d.setHours(0,0,0,0); return d; }
 function dateOf(s){ return new Date(s+'T00:00:00'); }
 function fmtD(d){ return d.toISOString().slice(0,10); }
-function newId(pfx){ return pfx+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 
-// ---- 储蓄：全部由 Apps Script 计算，小程序只负责显示 ----
-// Sheet 的 Savings 表是唯一真相；本地不再算利息，避免多设备各算一遍。
+// ---- 储蓄 ----
 function rebuildSavings(rows){
-  const list=(rows||[]).filter(function(r){
+  DATA.cd.groups[0].holdings=(rows||[]).filter(function(r){
     return (r.status||'').toString().toLowerCase()!=='closed';
   }).map(function(r){
     const rate=parseFloat(r.rate)||0;
-    const ratePc=rate>1?rate:rate*100;      // Sheet 里 4 或 0.04 都认
+    const ratePc=rate>1?rate:rate*100;
     const mat=(r.maturity||'').toString().slice(0,10);
     return {
       id:r.id, sym:r.name, type:(r.type||'OS').toString().toUpperCase(),
-      mv:Math.round(parseFloat(r.balance)||0), rate:ratePc, mat:mat,
-      lastPost:(r.lastPost||'').toString().slice(0,10),
-      nextUpdate:(r.nextUpdate||'').toString().slice(0,10),
-      noprice:true,
+      mv:Math.round(parseFloat(r.balance)||0), rate:ratePc, mat:mat, noprice:true,
       qty:(ratePc?ratePc.toFixed(2).replace(/\.?0+$/,'')+'%':''),
       desc:(mat?('到期 '+mat.replace(/-/g,'/')):'活期')
     };
   });
-  DATA.cd.groups[0].holdings=list;
 }
 function marcusItem(){
   return DATA.cd.groups[0].holdings.find(function(x){ return x.type==='OS'; })
       || DATA.cd.groups[0].holdings[0] || null;
 }
 
+// ---- 国债 ----
+// 半年付息、复利、到期本金回流全部由 Apps Script 处理，利息直接进流动现金，不再弹窗。
+function rebuildBonds(rows){
+  DATA.bond.groups[0].holdings=(rows||[]).filter(function(r){
+    return (r.status||'').toString().toLowerCase()!=='closed';
+  }).map(function(r){
+    const rate=parseFloat(r.rate)||0;
+    const ratePc=rate>1?rate:rate*100;
+    const mat=(r.maturity||'').toString().slice(0,10);
+    let nextPost='';
+    if(r.lastPost){
+      const lp=dateOf(r.lastPost);
+      nextPost=fmtD(new Date(lp.getFullYear(), lp.getMonth()+6, lp.getDate()));
+    }
+    const showNext=(r.type==='T-Note' && nextPost && nextPost<=mat);
+    return {
+      id:r.id, sym:r.name, btype:r.type, start:(r.start||'').slice(0,10), term:r.term,
+      rate:ratePc, principal:parseFloat(r.principal)||0,
+      mv:Math.round(parseFloat(r.balance)||0), mat:mat, noprice:true,
+      qty:(ratePc?ratePc.toFixed(2).replace(/\.?0+$/,'')+'%':''),
+      desc:r.type+' · 到期 '+mat.replace(/-/g,'/')+
+           (showNext?('  ·  下次付息 '+nextPost.replace(/-/g,'/')):'')
+    };
+  });
+}
 function calcMaturity(startStr, termYears){
   if(!startStr||!termYears) return '';
   const d=dateOf(startStr);
   d.setFullYear(d.getFullYear()+parseInt(termYears));
   return fmtD(d);
 }
-
-// ---- 国债 ----
-function rollBond(item){
-  if(!item.id) item.id=newId('bd');
-  if(item.baseMv==null){ item.baseMv=item.mv||0; }
-  if(!item.start){ item.start=item.updated||ASOF; }
-  if(!item.term){ item.term=1; }
-  if(!item.btype){ item.btype='T-Note'; }
-  item.mat=calcMaturity(item.start, item.term);
-  const today=todayD();
-  const mat=dateOf(item.mat);
-  item.qty=(item.rate?item.rate+'%':'');
-
-  if(item.btype==='I-Bond'){
-    // 每半年复利，利息滚进本金，不产生现金
-    if(item.lastCompound==null) item.lastCompound=item.start;
-    let last=dateOf(item.lastCompound);
-    let bal=item.mv!=null?item.mv:item.baseMv;
-    let done=false;
-    while(true){
-      const next=new Date(last); next.setMonth(next.getMonth()+6);
-      if(next<=today && next<=mat){ bal=bal*(1+(item.rate/100)/2); last=next; done=true; } else break;
-    }
-    if(done){ item.mv=Math.round(bal); item.lastCompound=fmtD(last); }
-    else if(item.mv==null){ item.mv=item.baseMv; }
-    item.desc='I-Bond · 到期 '+item.mat.replace(/-/g,'/');
-    if(today>=mat){
-      pendingEvents.push({kind:'bondMature', src:'bond', id:item.id,
-        label:item.sym+' 到期', amount:item.mv, date:item.mat,
-        detail:'含全部复利'});
-      item.desc='已到期 · 待入账';
-    }
-  } else if(item.btype==='T-Bill'){
-    // 贴现式：持有期收益 = 本金 × 年利率 × 年数，到期一次性拿回
-    item.mv=item.baseMv;
-    const gain=item.baseMv*(item.rate/100)*parseFloat(item.term);
-    item.desc='T-Bill · 到期 '+item.mat.replace(/-/g,'/')+' · 到期收益 $'+gain.toFixed(2);
-    if(today>=mat){
-      pendingEvents.push({kind:'bondMature', src:'bond', id:item.id,
-        label:item.sym+' 到期', amount:Math.round((item.baseMv+gain)*100)/100, date:item.mat,
-        detail:'本金 $'+fmt(item.baseMv)+' + 收益 $'+gain.toFixed(2)});
-      item.desc='已到期 · 待入账';
-    }
-  } else {
-    // T-Note：每半年付息。只列出「还没入账」的，绝不自动推进 lastCoupon
-    item.mv=item.baseMv;
-    if(item.lastCoupon==null) item.lastCoupon=item.start;
-    let last=dateOf(item.lastCoupon);
-    let guard=0;
-    while(guard++<80){
-      const next=new Date(last); next.setMonth(next.getMonth()+6);
-      if(next>mat) break;
-      if(next<=today){
-        pendingEvents.push({kind:'coupon', src:'bond', id:item.id,
-          label:item.sym+' 半年息', amount:Math.round(item.baseMv*(item.rate/100)/2*100)/100,
-          date:fmtD(next), couponDate:fmtD(next),
-          detail:'本金 $'+fmt(item.baseMv)+' × '+item.rate+'% ÷ 2'});
-        last=next;
-      } else break;
-    }
-    item.desc='T-Note · 到期 '+item.mat.replace(/-/g,'/');
-    if(today>=mat){
-      pendingEvents.push({kind:'bondMature', src:'bond', id:item.id,
-        label:item.sym+' 到期还本', amount:item.baseMv, date:item.mat, detail:'返还本金'});
-      item.desc='已到期 · 待入账';
-    }
-  }
-  return item;
-}
-function rollAllBond(){ DATA.bond.groups[0].holdings.forEach(rollBond); persistBond(); }
-
-// 每次重算都刷新事件队列（纯计算，不改账）
-function rebuildEvents(){
-  pendingEvents=[];
-  rollAllBond();
-  pendingEvents.sort(function(a,b){ return a.date<b.date?-1:a.date>b.date?1:0; });
-}
-
-// ---- 入账 ----
-function addMoneyTo(dest, amt){
-  if(dest==='chase'){ addToChase(amt, '国债利息'); }
-  else{
-    const m=marcusItem();
-    if(m){
-      m.mv=Math.round((m.mv||0)+amt);
-      apiWrite({action:'adjustSaving', id:m.id, delta:Math.round(amt)}).then(refreshSavings);
-    }else{ addToChase(amt, '国债利息'); }
-  }
-}
-function settleEvent(dest){
-  const ev=pendingEvents[0];
-  if(!ev) return;
-  addMoneyTo(dest, ev.amount);
-  // 目前只有国债会产生待入账事件；CD 到期由 Apps Script 自动转入 OS，不走这里
-  const it=DATA.bond.groups[0].holdings.find(function(x){ return x.id===ev.id; });
-  if(it && ev.kind==='coupon'){ it.lastCoupon=ev.couponDate; persistBond(); }
-  else{
-    DATA.bond.groups[0].holdings=DATA.bond.groups[0].holdings.filter(function(x){ return x.id!==ev.id; });
-    persistBond();
-  }
-  rebuildEvents();
-  recompute();
-  showNextEvent();
-}
-function showNextEvent(){
-  const mount=document.getElementById('bondModalMount');
-  if(!pendingEvents.length){ mount.innerHTML=''; return; }
-  const ev=pendingEvents[0];
-  const more=pendingEvents.length>1?('<div style="font-size:11px;color:var(--ink-faint);margin-top:10px">还有 '+(pendingEvents.length-1)+' 笔待处理</div>'):'';
-  mount.innerHTML=
-    '<div class="imodal-bg"><div class="imodal">'+
-      '<h3>'+(ev.kind==='coupon'?'国债利息到账':'到期资金入账')+'</h3>'+
-      '<p>'+ev.label+'（'+ev.date.replace(/-/g,'/')+'）<br>'+(ev.detail||'')+'</p>'+
-      '<div class="amt-big">$'+fmt(ev.amount)+'</div>'+
-      '<p>请选择存入哪个账户：</p>'+
-      '<div class="choice">'+
-        '<button style="background:#1a9d4a" onclick="settleEvent(\'chase\')">Chase</button>'+
-        '<button style="background:#7c3aed" onclick="settleEvent(\'marcus\')">Marcus 9250</button>'+
-      '</div>'+ more +
-    '</div></div>';
-}
-
-loadBond();
-rebuildEvents();
 
 // ==================== 401k ====================
 function load401k(){
@@ -1165,7 +1050,7 @@ function renderOverview(){
 
 // 全量重算（所有编辑操作后调用）
 function recompute(){
-  rebuildEvents(); roll401k();
+  roll401k();
   renderOverview();
 }
 // 如果当前停在某个详情页，重绘它
@@ -1178,7 +1063,6 @@ function refreshOpenDetail(){
 
 // ==================== 详情页 ====================
 function openDetail(k, keepScroll){
-  if(k==='bond') rebuildEvents();
   if(k==='retire') roll401k();
   currentDetailKey=k;
   computeTotals();
@@ -1415,7 +1299,7 @@ function saveCd(){
     it.sym=name; it.rate=rate; it.mat=mat; it.mv=Math.round(mv);
     recompute(); openDetail('cd', true);
     apiWrite(payload).then(function(res){
-      if(res && res.status==='success') refreshSavings();
+      if(res && res.status==='success') refreshFromSheet();
       else alert('保存失败：'+((res&&res.message)||'未知原因'));
     });
   }else{
@@ -1427,7 +1311,7 @@ function saveCd(){
               maturity:mat, srcId:src?src.id:''}).then(function(res){
       if(res && res.status==='success'){
         if(srcKey==='chase'){ deductSource('chase', Math.round(mv)); }
-        refreshSavings();
+        refreshFromSheet();
       }else alert('新增失败：'+((res&&res.message)||'未知原因'));
     });
   }
@@ -1440,20 +1324,25 @@ function deleteCd(i){
   DATA.cd.groups[0].holdings.splice(i,1);
   recompute(); openDetail('cd', true);
   apiWrite({action:'deleteSaving', id:item.id}).then(function(res){
-    if(!(res && res.status==='success')){ alert('删除失败，正在恢复'); refreshSavings(); }
+    if(!(res && res.status==='success')){ alert('删除失败，正在恢复'); refreshFromSheet(); }
   });
 }
 // 重新拉一次 Savings（写操作之后用，拿 Apps Script 算好的权威值）
-function refreshSavings(){
+function refreshFromSheet(){
   return fetch(SHEET_API+'?_t='+Date.now())
     .then(function(r){ return r.json(); })
     .then(function(data){
       if(data && data.status==='success'){
         rebuildSavings(data.savings);
+        rebuildBonds(data.bond);
+        setCashFromServer(data.cash);
+        ledgerRows = Array.isArray(data.ledger) ? data.ledger : ledgerRows;
+        monthlyTotals = data.monthly || monthlyTotals;
         notices = data.notices || [];
+        rebuildMonthExpense();
         recompute();
         renderNotices();
-        if(currentDetailKey==='cd') openDetail('cd', true);
+        if(currentDetailKey) openDetail(currentDetailKey, true);
       }
     }).catch(function(e){ console.log('refresh savings failed', e); });
 }
@@ -1487,13 +1376,15 @@ function bondFormHtml(vals, isEdit){
       '</select></div>'+
     '<div class="fld"><label>金额 ($) · 本金</label>'+
       '<input id="b-mv" type="number" inputmode="decimal" value="'+(vals.baseMv!=null?vals.baseMv:'')+'" placeholder="例：10000"></div>'+
+    (isEdit?'<div class="fld"><label>当前余额 ($) · 可校正</label>'+
+      '<input id="b-bal" type="number" inputmode="decimal" value="'+(vals.bal!=null?vals.bal:'')+'"></div>':'')+
     '<div class="fld"><label>年利率 (%)'+(btype==='I-Bond'?' · 可随时调整':'')+'</label>'+
       '<input id="b-rate" type="number" inputmode="decimal" value="'+(vals.rate!=null?vals.rate:'')+'" placeholder="例：3.75"></div>'+
     (isEdit?'':'<div class="fld"><label>资金来源</label>'+
       '<select id="b-src" style="'+selStyle+'">'+
         '<option value="">无（仅补录）</option>'+
-        '<option value="chase">Checking - Chase</option>'+
-        '<option value="marcus">Marcus OS-9250</option>'+
+        '<option value="chase">流动现金 - Chase</option>'+
+        '<option value="marcus">Marcus 活期 OS</option>'+
       '</select></div>')+
     '<div class="btns">'+
       '<button class="cancel" onclick="renderBondAdd()">取消</button>'+
@@ -1524,7 +1415,7 @@ function editBond(i){
   const item=DATA.bond.groups[0].holdings[i];
   const wrap=document.getElementById('bondAddWrap');
   wrap.innerHTML=bondFormHtml({btype:item.btype, start:item.start, term:item.term,
-    baseMv:(item.baseMv!=null?item.baseMv:item.mv), rate:item.rate}, true);
+    baseMv:item.principal, bal:item.mv, rate:item.rate}, true);
   wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
 function saveBond(){
@@ -1533,39 +1424,51 @@ function saveBond(){
   const term=document.getElementById('b-term').value;
   const mv=parseFloat(document.getElementById('b-mv').value);
   const rate=parseFloat(document.getElementById('b-rate').value)||0;
+  const balEl=document.getElementById('b-bal');
   if(!start || !(mv>0)){ alert('请填写起始日和金额'); return; }
-  const sym=btype+' '+term+'Y';
-  const item={sym:sym, btype:btype, start:start, term:term, rate:rate, baseMv:Math.round(mv),
-              mv:Math.round(mv), lastCompound:start, lastCoupon:start};
-  item.mat=calcMaturity(start,term);
+  const name=btype+' '+term+'Y';
+
   if(editingBondIndex>=0){
-    const old=DATA.bond.groups[0].holdings[editingBondIndex];
-    item.lastCompound=old.lastCompound||start;
-    item.lastCoupon=old.lastCoupon||start;
-    item.mv=old.mv!=null?old.mv:item.baseMv;
-    DATA.bond.groups[0].holdings[editingBondIndex]=item;
+    const it=DATA.bond.groups[0].holdings[editingBondIndex];
+    const payload={action:'updateBond', id:it.id, name:name, type:btype,
+                   start:start, term:term, rate:rate, principal:mv};
+    if(balEl && balEl.value!=='' && Math.round(parseFloat(balEl.value))!==Math.round(it.mv)){
+      payload.balance=parseFloat(balEl.value);   // 手动校正余额时以填的为准
+    }
     editingBondIndex=-1;
-  } else {
-    DATA.bond.groups[0].holdings.push(item);
+    it.sym=name; it.btype=btype; it.start=start; it.term=term; it.rate=rate; it.principal=mv;
+    if(payload.balance!=null) it.mv=Math.round(payload.balance);
+    recompute(); openDetail('bond', true);
+    apiWrite(payload).then(function(res){
+      if(res && res.status==='success') refreshFromSheet();
+      else alert('保存失败：'+((res&&res.message)||'未知原因'));
+    });
+  }else{
     const srcEl=document.getElementById('b-src');
-    if(srcEl && srcEl.value){ deductSource(srcEl.value, item.baseMv); }
+    const srcKey=srcEl?srcEl.value:'';
+    const src=(srcKey==='marcus')?marcusItem():null;
+    apiWrite({action:'addBond', name:name, type:btype, start:start, term:term,
+              rate:rate, principal:mv, srcId:src?src.id:''}).then(function(res){
+      if(res && res.status==='success'){
+        if(srcKey==='chase'){ deductSource('chase', Math.round(mv), 'bond'); }
+        refreshFromSheet();
+      }else alert('新增失败：'+((res&&res.message)||'未知原因'));
+    });
   }
-  rollAllBond();
-  recompute();
-  openDetail('bond', true);
 }
 function deleteBond(i){
   const item=DATA.bond.groups[0].holdings[i];
   if(!item) return;
-  if(!confirm('删除 '+item.sym+' ？此操作不可撤销。')) return;
-  DATA.bond.groups[0].holdings.splice(i,1);
+  if(!confirm('删除 '+item.sym+' ？\n钱不会自动转到别处。')) return;
   editingBondIndex=-1;
-  persistBond();
-  recompute();
-  openDetail('bond', true);
+  DATA.bond.groups[0].holdings.splice(i,1);
+  recompute(); openDetail('bond', true);
+  apiWrite({action:'deleteBond', id:item.id}).then(function(res){
+    if(!(res && res.status==='success')){ alert('删除失败，正在恢复'); refreshFromSheet(); }
+  });
 }
 
-// ==================== 401k ====================
+// ==================== 401k 编辑界面 ====================
 function show401kForm(){
   const it=DATA.retire.groups[0].holdings.find(x=>x.growth);
   let wrap=document.getElementById('k401Wrap');
@@ -1895,7 +1798,7 @@ function sourceBalance(key){
 // 转账：从 Chase 出去的钱记进 Ledger（Transfer 前缀，不算支出），
 // 从 Marcus 出去的由 Savings 引擎处理；到账端一律按增量写。
 function transferLabel(key){
-  return key==='broker'?'券商':key==='mortgage'?'房贷':key==='marcus'?'Marcus':key;
+  return key==='broker'?'券商':key==='mortgage'?'房贷':key==='marcus'?'Marcus':key==='bond'?'国债':key;
 }
 function deductSource(key, amt, tgtKey, dateStr, dedupeKey){
   if(key==='chase'){
@@ -1912,7 +1815,7 @@ function deductSource(key, amt, tgtKey, dateStr, dedupeKey){
   }else if(key==='marcus'){
     const it=marcusItem(); if(!it) return;
     it.mv=Math.max(0,Math.round((it.mv||0)-amt));
-    apiWrite({action:'adjustSaving', id:it.id, delta:-Math.round(amt)}).then(refreshSavings);
+    apiWrite({action:'adjustSaving', id:it.id, delta:-Math.round(amt)}).then(refreshFromSheet);
   }
 }
 function addToTarget(key, amt){
@@ -1925,7 +1828,7 @@ function addToTarget(key, amt){
   }else if(key==='marcus'){
     const it=marcusItem(); if(!it) return;
     it.mv=Math.round((it.mv||0)+amt);
-    apiWrite({action:'adjustSaving', id:it.id, delta:Math.round(amt)}).then(refreshSavings);
+    apiWrite({action:'adjustSaving', id:it.id, delta:Math.round(amt)}).then(refreshFromSheet);
   }
 }
 function doTransfer(srcKey, tgtKey, amt, dateStr, dedupeKey){
@@ -2101,6 +2004,31 @@ function renderIncome(){
     '<div id="cashTabBody"></div>';
   renderCashTabBody();
 }
+// 本月的收入流水，国债半年息、分红、工资、Bonus 都会出现在这里
+function renderIncomeRows(){
+  const ym=curYm();
+  const rows=ledgerRows.filter(function(r){
+    return (r.date||'').slice(0,7)===ym && catKind(r.category)==='income';
+  }).sort(function(a,b){ return (a.date<b.date?1:a.date>b.date?-1:b.row-a.row); });
+  let h='<div style="display:flex;align-items:baseline;margin:18px 2px 8px">'+
+    '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">本月收入明细</div>'+
+    '<div class="num" style="font-size:12px;color:var(--ink-faint)">'+rows.length+' 笔</div></div>';
+  if(!rows.length){
+    h+='<div class="placeholder">本月还没有收入记录</div>';
+  }else{
+    h+='<div class="group">'+rows.map(function(r){
+      const label=(r.category||'').replace(/^Income · /,'');
+      return '<div class="row" style="cursor:pointer" onclick="editLedger('+r.row+')">'+
+        '<div class="tk" style="width:auto;flex:1">'+
+          '<div class="sym" style="font-size:13px">'+(r.note||label)+'</div>'+
+          '<div class="qty">'+(r.date||'').replace(/-/g,'/')+' · '+label+'</div></div>'+
+        '<div class="val"><div class="mv" style="color:var(--pos)">+$'+
+          (parseFloat(r.amount)||0).toFixed(2)+'</div></div></div>'+
+        '<div class="stock-slot" id="lg-'+r.row+'"></div>';
+    }).join('')+'</div>';
+  }
+  return h;
+}
 function switchCashTab(t){ cashTab=t; expenseDrill=null; editingLedgerRow=null; renderIncome(); }
 function renderCashTabBody(){
   const body=document.getElementById('cashTabBody');
@@ -2110,7 +2038,8 @@ function renderCashTabBody(){
     const freqLabel={weekly:'每周',biweekly:'每两周',monthly:'每月'};
     const payrollLine = p&&p.amount ? ('已设：'+(freqLabel[p.freq]||'每两周')+' $'+fmt(p.amount)) : '未设置';
     const mt=(monthlyTotals||{})[curYm()]||{};
-    const inSum=mt.income||0, net=(mt.income||0)-(mt.expense||0)-(mt.transfer||0);
+    const inSum=mt.income||0;
+    const net=(mt.net!=null)?mt.net:(inSum-(mt.expense||0));   // 净收入 = 收入 − 支出
     body.innerHTML=
       '<div class="group" style="background:#ECEEE1;border:none">'+
         '<div class="row" style="border-color:rgba(0,0,0,.05);cursor:pointer" onclick="showPayrollForm()">'+
@@ -2131,13 +2060,14 @@ function renderCashTabBody(){
         '<div style="flex:1;border-radius:14px;padding:11px 12px;background:var(--cash-bg);text-align:center">'+
           '<div style="font-size:11px;color:var(--cash);font-weight:600">本月收入</div>'+
           '<div class="num" style="font-size:16px;font-weight:650;color:var(--ink);margin-top:2px">$'+fmt(inSum)+'</div></div>'+
-        '<div style="flex:1;border-radius:14px;padding:11px 12px;background:#f3e9fd;text-align:center">'+
-          '<div style="font-size:11px;color:var(--cd);font-weight:600">净流入</div>'+
-          '<div class="num" style="font-size:16px;font-weight:650;color:'+(net>=0?'var(--pos)':'var(--neg)')+';margin-top:2px">'+
+        '<div style="flex:1;border-radius:14px;padding:11px 12px;background:#D8E3E7;text-align:center">'+
+          '<div style="font-size:11px;color:var(--cash);font-weight:600">净收入</div>'+
+          '<div class="num" style="font-size:16px;font-weight:650;color:var(--ink);margin-top:2px">'+
             (net>=0?'+':'−')+'$'+fmt(Math.abs(net))+'</div></div>'+
-        '<button style="flex:1;border:none;border-radius:14px;padding:11px 12px;background:var(--stock-bg);'+
-          'color:var(--stock);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="showReconcileForm()">对账</button>'+
-      '</div>';
+        '<button style="flex:1;border:none;border-radius:14px;padding:11px 12px;background:#FBECDE;'+
+          'color:var(--cash);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="showReconcileForm()">对账</button>'+
+      '</div>'+
+      renderIncomeRows();
     }else if(expenseDrill){
     renderExpenseDrill(body);
   }else{
@@ -2222,9 +2152,12 @@ function renderExpenseDrill(body){
 function ledgerFormHtml(v, isEdit){
   v=v||{};
   const st='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
-  const cat=matchCat(v.category)||v.category||(expenseDrill&&expenseDrill!=='__ALL__'?expenseDrill:EXP_CATS[0]);
-  let opts=EXP_CATS.map(function(c){ return '<option value="'+c+'"'+(cat===c?' selected':'')+'>'+c+'</option>'; }).join('');
-  if(!matchCat(cat)){ opts='<option value="'+cat+'" selected>'+cat+'（不匹配，请改正）</option>'+opts; }
+  const cat=v.category||(expenseDrill&&expenseDrill!=='__ALL__'?expenseDrill:EXP_CATS[0]);
+  const kind=catKind(cat);
+  const INCOME_CATS=['Income · Payroll','Income · Bonus','Income · 国债利息','Income · 调整'];
+  const pool=(kind==='income')?INCOME_CATS:EXP_CATS;
+  let opts=pool.map(function(c){ return '<option value="'+c+'"'+(cat===c?' selected':'')+'>'+c+'</option>'; }).join('');
+  if(pool.indexOf(cat)<0){ opts='<option value="'+cat+'" selected>'+cat+(kind==='expense'&&!matchCat(cat)?'（不匹配，请改正）':'')+'</option>'+opts; }
   return '<div class="editform" style="border-color:var(--cash-ln)">'+
     '<div class="fld"><label>日期</label><input id="lg-date" type="date" value="'+(v.date||new Date().toISOString().slice(0,10))+'"></div>'+
     '<div class="fld"><label>分类</label><select id="lg-cat" style="'+st+'">'+opts+'</select></div>'+
@@ -2474,7 +2407,6 @@ function go(id){
 renderOverview();        // 先用本地数据渲染，避免白屏
 renderPropPage();
 syncStockFromSheet();    // 再拉 Sheet：结算固定支出、按月对账、工资、定期转账
-showNextEvent();         // 有到期/付息待处理就弹窗
 
 </script>
 </body>
