@@ -183,19 +183,6 @@
   <div class="allocbar" id="allocbar"></div>
   <div class="classlist" id="classlist"></div>
   <div id="propslot"></div>
-  <div class="gauge">
-    <div class="top">
-      <span class="t">半导体集中度 · 占股票类</span>
-      <span class="v num" id="semiPc">—</span>
-    </div>
-    <div class="track"><div class="fill" id="semiFill"></div></div>
-    <div class="marks">
-      <span class="mark" style="left:25%">健康 20%</span>
-      <span class="mark" style="left:50%">偏高 40%</span>
-      <span class="mark" style="left:75%">过高 60%</span>
-    </div>
-    <div class="note" id="semiNote"></div>
-  </div>
   <div class="foot">
     <div class="badge" id="syncBadge">同步中…</div><br>
     点击任意大类查看明细 · 点右上角日期可手动重新同步
@@ -404,6 +391,29 @@ function rebuildMonthExpense(){
     m[cat]=(m[cat]||0)+(parseFloat(r.amount)||0);
   });
   monthExpense=m;
+  rebuildMonthTotals();
+}
+// 本地改过流水后，用明细重算「明细完整」那几个月的汇总，
+// 否则刚补记的工资/支出要等下次同步才会反映到卡片上
+function rebuildMonthTotals(){
+  const months=(ledgerMonths&&ledgerMonths.length)?ledgerMonths:[curYm()];
+  const acc={};
+  months.forEach(function(ym){ acc[ym]={income:0,expense:0,transfer:0,redeem:0}; });
+  ledgerRows.forEach(function(r){
+    const ym=(r.date||'').slice(0,7);
+    if(!acc[ym]) return;
+    const amt=parseFloat(r.amount)||0;
+    const k=catKind(r.category);
+    if(k==='income') acc[ym].income+=amt;
+    else if(k==='transfer') acc[ym].transfer+=amt;
+    else if(k==='redeem') acc[ym].redeem+=amt;
+    else acc[ym].expense+=amt;
+  });
+  Object.keys(acc).forEach(function(ym){
+    const a=acc[ym];
+    const prev=monthlyTotals[ym]||{};
+    monthlyTotals[ym]=Object.assign({}, prev, a, {net:Math.round((a.income-a.expense)*100)/100});
+  });
 }
 
 function setSyncBadge(state, extra){
@@ -850,15 +860,15 @@ function rebuildBonds(rows){
       let amt=0;
       if(r.type==='T-Note') amt=prin*rate/2;          // 半年息，打进流动现金
       else if(r.type==='I-Bond') amt=bal*rate/2;      // 半年复利，滚进本金
-      if(amt>0) nextTxt='Next payment $'+amt.toFixed(2)+' @ '+nextPost.replace(/-/g,'/');
+      if(amt>0) nextTxt='Next: $'+amt.toFixed(2)+' @ '+nextPost.replace(/-/g,'/');
     }
     if(!nextTxt && r.type==='T-Bill'){
       const gain=prin*rate*(parseFloat(r.term)||1);
-      if(gain>0) nextTxt='Next payment $'+gain.toFixed(2)+' @ '+mat.replace(/-/g,'/');
+      if(gain>0) nextTxt='Next: $'+gain.toFixed(2)+' @ '+mat.replace(/-/g,'/');
     }
     if(!nextTxt && mat) nextTxt='到期 '+mat.replace(/-/g,'/');
     return {
-      id:r.id, sym:r.name, btype:r.type, start:(r.start||'').slice(0,10), term:r.term,
+      id:r.id, sym:(r.type==='I-Bond'?'I Bond':r.name), btype:r.type, start:(r.start||'').slice(0,10), term:r.term,
       rate:ratePc, principal:prin, mv:Math.round(bal), mat:mat, noprice:true,
       qty:(ratePc?ratePc.toFixed(2).replace(/\.?0+$/,'')+'%':''),
       desc:nextTxt
@@ -990,12 +1000,12 @@ function findHolding(sym){
 }
 
 function renderSemi(){
+  const fill=document.getElementById('semiFill');
+  if(!fill) return;                 // 主页已不显示集中度仪表盘
   const stockT = classTotal.stock||0;
   const semiG = semiGroupOf();
   const semiT = semiG ? sumH(semiG) : 0;
   const semiP = stockT>0 ? semiT/stockT*100 : 0;
-  const fill=document.getElementById('semiFill');
-  if(!fill) return;
   fill.style.width=Math.min(semiP/80*100,100)+'%';
   fill.style.background=semiP<=20?'var(--pos)':semiP<=40?'#c2820a':'var(--neg)';
   document.getElementById('semiPc').textContent=semiP.toFixed(1)+'%';
@@ -1118,13 +1128,13 @@ function openDetail(k, keepScroll){
       }
       // 无价条目
       // 国债右下角显示到期日而不是占比（占比对单笔国债没意义）
-      var sub = (k==='bond' && hh.mat)
-        ? hh.mat.replace(/-/g,'/')
-        : (hmv(hh)/safeT*100).toFixed(1)+'%';
-      var inner='<div class="tk"><div class="sym">'+hh.sym+'</div><div class="qty">'+(hh.qty||'')+'</div></div>'+
+      // 国债显示到期日；股票页（含券商现金）保留占比；其余板块单账户占比无意义，不显示
+      var sub = (k==='bond' && hh.mat) ? hh.mat.replace(/-/g,'/')
+              : (k==='stock' ? (hmv(hh)/safeT*100).toFixed(1)+'%' : '');
+      var inner='<div class="tk" style="width:88px"><div class="sym">'+hh.sym+'</div><div class="qty">'+(hh.qty||'')+'</div></div>'+
         '<div class="desc">'+(hh.desc||'')+'</div>'+
         '<div class="val"><div class="mv">$'+fmt(hmv(hh))+'</div>'+
-        '<div class="pc">'+sub+'</div></div>';
+        (sub?('<div class="pc">'+sub+'</div>'):'')+'</div>';
       if(k==='cd' || k==='bond'){
         var editFn = k==='cd'?'editCd':'editBond';
         return '<div class="row" style="cursor:pointer" onclick="'+editFn+'('+hi+')">'+inner+'</div>';
@@ -1147,7 +1157,9 @@ function openDetail(k, keepScroll){
       '<div class="stkgroup-head" style="background:'+headBg+'">'+
         '<span class="stkbar" style="background:'+accent+'"></span>'+
         '<div class="stkcat">'+g.cat+(g.sub?'<span class="stksub">'+g.sub+'</span>':'')+'</div>'+
-        '<span class="stkpc" style="color:'+accent+'">'+(gt/safeT*100).toFixed(1)+'%</span>'+
+        '<span class="stkpc" style="color:'+accent+'">'+
+          (k==='stock' ? (gt/safeT*100).toFixed(1)+'%'
+                       : (grand>0?(t/grand*100).toFixed(1):'0.0')+'%')+'</span>'+
       '</div>'+
       '<div class="stkrows">'+rowsHtml+'</div>'+
     '</div>';
@@ -1969,34 +1981,50 @@ const SRC_OPTS=[{k:'chase',n:'Checking - Chase'},{k:'marcus',n:'Marcus OS-9250'}
 const TGT_OPTS=[{k:'broker',n:'股票账户现金'},{k:'mortgage',n:'房贷（还款）'},{k:'marcus',n:'Marcus 活期 OS'}];
 function optName(list,k){ const o=list.find(x=>x.k===k); return o?o.n:k; }
 function openTransfer(){ renderTransfer(); go('transfer'); }
+// 下一次自动执行的日期
+function nextXferDate(r){
+  if(!r || !r.start) return '';
+  const today=todayD();
+  const freq=r.freq||'monthly';
+  let d=r.lastRun?nextByFreq(dateOf(r.lastRun), freq):dateOf(r.start);
+  let guard=0;
+  while(d<=today && guard++<400){ d=nextByFreq(d, freq); }
+  return fmtD(d).replace(/-/g,'/');
+}
 function renderTransfer(){
   const body=document.getElementById('transfer-body');
   const chase=sourceBalance('chase'), marcus=sourceBalance('marcus');
   const rec=loadRecurring();
   let html=
-    '<div class="dhero dark" style="border-color:var(--cash)">'+
-      '<div class="l" style="color:var(--cash)">可转出余额</div>'+
-      '<div style="display:flex;gap:20px;margin-top:6px">'+
-        '<div><div style="font-size:22px;font-weight:600" class="num">$'+fmt(chase)+'</div><div style="font-size:11px;color:var(--ink-faint)">Chase</div></div>'+
-        '<div><div style="font-size:22px;font-weight:600" class="num">$'+fmt(marcus)+'</div><div style="font-size:11px;color:var(--ink-faint)">Marcus OS</div></div>'+
-      '</div></div>'+
-    '<div style="font-size:13px;font-weight:600;color:var(--ink);margin:18px 2px 8px">一次性转账</div>'+
-    '<div class="editform" style="border-color:var(--cash-ln);margin-top:0">'+
+    '<div style="display:flex;gap:8px;margin-bottom:10px">'+
+      '<div style="flex:1;background:var(--cash-bg);border-radius:14px;padding:10px 12px">'+
+        '<div style="font-size:11px;color:var(--ink-2)">流动现金</div>'+
+        '<div class="num" style="font-size:17px;font-weight:650">$'+fmt(chase)+'</div></div>'+
+      '<div style="flex:1;background:var(--cd-bg);border-radius:14px;padding:10px 12px">'+
+        '<div style="font-size:11px;color:var(--ink-2)">Marcus OS</div>'+
+        '<div class="num" style="font-size:17px;font-weight:650">$'+fmt(marcus)+'</div></div>'+
+    '</div>'+
+    '<div style="font-size:13px;font-weight:600;color:var(--ink);margin:12px 2px 6px">一次性转账</div>'+
+    '<div class="editform" style="border-color:var(--cash-ln);margin-top:0;padding:12px">'+
       transferFormFields('o', false)+
       '<div class="btns"><button class="save" style="background:var(--cash)" onclick="submitOneTime()">确认转账</button></div>'+
     '</div>'+
-    '<div style="font-size:13px;font-weight:600;color:var(--ink);margin:18px 2px 8px">定期转账<span style="font-weight:400;color:var(--ink-faint)"> · 到期自动执行</span></div>'+
-    '<div class="editform" style="border-color:var(--retire-ln);margin-top:0">'+
+    '<div style="font-size:13px;font-weight:600;color:var(--ink);margin:12px 2px 6px">定期转账<span style="font-weight:400;color:var(--ink-faint)"> · 到期自动执行</span></div>'+
+    '<div class="editform" style="border-color:var(--retire-ln);margin-top:0;padding:12px">'+
       transferFormFields('r', true)+
       '<div class="btns"><button class="save" style="background:var(--retire)" onclick="submitRecurring()">保存定期转账</button></div>'+
     '</div>';
   if(rec.length){
     html+='<div class="group"><div class="grp-head"><div class="cat">已设置的定期转账</div></div>'+
       rec.map(function(r,i){
-        return '<div class="row"><div class="tk" style="width:auto;flex:1">'+
+        const nxt=nextXferDate(r);
+        return '<div class="row" style="padding:10px 14px"><div class="tk" style="width:auto;flex:1">'+
           '<div class="sym" style="font-size:13px">'+optName(SRC_OPTS,r.src)+' → '+optName(TGT_OPTS,r.tgt)+'</div>'+
           '<div class="qty">'+(XFER_FREQ[r.freq||'monthly'])+' $'+fmt(r.amt)+'</div></div>'+
-          '<div class="val"><button class="cancel" style="padding:6px 12px;font-size:12px;border:none;border-radius:8px;background:#fdecec;color:var(--neg);font-family:inherit;font-weight:600;cursor:pointer" onclick="delRecurring('+i+')">删除</button></div></div>';
+          '<div style="text-align:right;margin-right:12px">'+
+            '<div style="font-size:11px;color:var(--ink-faint)">Next transfer</div>'+
+            '<div class="num" style="font-size:12px;color:var(--ink-2);font-weight:600">'+(nxt||'—')+'</div></div>'+
+          '<button class="cancel" style="padding:6px 12px;font-size:12px;border:none;border-radius:8px;background:#fdecec;color:var(--neg);font-family:inherit;font-weight:600;cursor:pointer" onclick="delRecurring('+i+')">删除</button></div>';
       }).join('')+'</div>';
   }
   body.innerHTML=html;
@@ -2004,19 +2032,19 @@ function renderTransfer(){
 const XFER_SEL='width:100%;border:1px solid var(--line);border-radius:10px;background:#fafbfc;'+
   'padding:11px 12px;font-size:16px;color:var(--ink);font-family:inherit;-webkit-appearance:none';
 function transferFormFields(p, withFreq){
-  let h='<div class="fld"><label>From</label>'+
+  let h='<div class="fld" style="margin-bottom:8px"><label>From</label>'+
       '<select id="'+p+'-src" style="'+XFER_SEL+'">'+SRC_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
-    '<div class="fld"><label>To</label>'+
+    '<div class="fld" style="margin-bottom:8px"><label>To</label>'+
       '<select id="'+p+'-tgt" style="'+XFER_SEL+'">'+TGT_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
-    '<div class="fld"><label>金额 ($)</label>'+
+    '<div class="fld" style="margin-bottom:8px"><label>金额 ($)</label>'+
       '<input id="'+p+'-amt" type="number" inputmode="decimal" placeholder="例：500"></div>';
   if(withFreq){
-    h+='<div class="fld"><label>频率</label>'+
+    h+='<div class="fld" style="margin-bottom:8px"><label>频率</label>'+
       '<select id="'+p+'-freq" style="'+XFER_SEL+'">'+
         Object.keys(XFER_FREQ).map(function(k){
           return '<option value="'+k+'"'+(k==='monthly'?' selected':'')+'>'+XFER_FREQ[k]+'</option>';
         }).join('')+'</select></div>'+
-      '<div class="fld"><label>首次转账日</label>'+
+      '<div class="fld" style="margin-bottom:8px"><label>首次转账日</label>'+
         '<input id="'+p+'-start" type="date" value="'+fmtD(todayD())+'"></div>';
   }
   return h;
