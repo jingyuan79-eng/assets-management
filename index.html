@@ -100,15 +100,16 @@
   .addbox .plus{font-size:22px;font-weight:400;color:var(--cd);line-height:1;}
   .addbox .lbl{font-size:12px;color:var(--ink-2);margin-top:4px;}
   .editform{border:1px solid var(--cd-ln);background:var(--card);border-radius:var(--radius);
-    padding:16px;margin-top:4px;}
-  .editform .fld{margin-bottom:12px;}
-  .editform label{display:block;font-size:12px;color:var(--ink-2);margin-bottom:5px;font-weight:500;}
-  .editform input{width:100%;border:1px solid var(--line);border-radius:10px;background:#fafbfc;
-    padding:11px 12px;font-size:16px;color:var(--ink);font-family:inherit;
-    font-variant-numeric:tabular-nums;-webkit-appearance:none;}
-  .editform input:focus{outline:none;border-color:var(--cd);background:#fff;}
-  .editform .btns{display:flex;gap:10px;margin-top:6px;}
-  .editform button{flex:1;border:none;border-radius:10px;padding:12px;font-size:14px;
+    padding:12px;margin-top:4px;}
+  .editform .fld{margin-bottom:8px;}
+  .editform label{display:block;font-size:11px;color:var(--ink-2);margin-bottom:3px;font-weight:500;}
+  .editform input,.editform select{width:100%;border:1px solid var(--line);border-radius:10px;
+    background:#fafbfc;padding:8px 10px;font-size:16px;color:var(--ink);font-family:inherit;
+    font-variant-numeric:tabular-nums;-webkit-appearance:none;line-height:1.25;}
+  .editform select{-webkit-appearance:menulist;padding:7px 8px;}
+  .editform input:focus,.editform select:focus{outline:none;border-color:var(--cd);background:#fff;}
+  .editform .btns{display:flex;gap:8px;margin-top:4px;}
+  .editform button{flex:1;border:none;border-radius:10px;padding:10px;font-size:14px;
     font-weight:600;font-family:inherit;cursor:pointer;}
   .editform .save{background:var(--cd);color:#fff !important;border-radius:12px;}
   .editform .cancel{background:#eceef2;color:var(--ink-2);}
@@ -686,7 +687,7 @@ function renderFixedSection(cat){
 
 function fixedFormHtml(v, cat){
   v=v||{};
-  const st='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  const st='';
   const freq=v.freq||'monthly';
   return '<div class="editform" style="border-color:rgba(0,0,0,.12)">'+
     '<div style="font-size:12px;color:var(--ink-faint);margin-bottom:12px">归入 '+cat+'</div>'+
@@ -854,26 +855,38 @@ function rebuildBonds(rows){
     }
     const bal=parseFloat(r.balance)||0;
     const prin=parseFloat(r.principal)||0;
-    // 下一次入息：金额 + 日期。到期日之后就不再有下一次。
-    let nextTxt='';
-    if(nextPost && nextPost<=mat){
-      let amt=0;
-      if(r.type==='T-Note') amt=prin*rate/2;          // 半年息，打进流动现金
-      else if(r.type==='I-Bond') amt=bal*rate/2;      // 半年复利，滚进本金
-      if(amt>0) nextTxt='Next: $'+amt.toFixed(2)+' @ '+nextPost.replace(/-/g,'/');
-    }
-    if(!nextTxt && r.type==='T-Bill'){
-      const gain=prin*rate*(parseFloat(r.term)||1);
-      if(gain>0) nextTxt='Next: $'+gain.toFixed(2)+' @ '+mat.replace(/-/g,'/');
-    }
-    if(!nextTxt && mat) nextTxt='到期 '+mat.replace(/-/g,'/');
+    // 下一次付息：只有 T-Note 会把利息打进流动现金，I-Bond 是复利滚进本金
+    let nextAmt=0;
+    if(r.type==='T-Note' && nextPost && nextPost<=mat) nextAmt=Math.round(prin*rate/2*100)/100;
     return {
       id:r.id, sym:(r.type==='I-Bond'?'I Bond':r.name), btype:r.type, start:(r.start||'').slice(0,10), term:r.term,
       rate:ratePc, principal:prin, mv:Math.round(bal), mat:mat, noprice:true,
+      nextDate:(nextPost&&nextPost<=mat)?nextPost:'', nextAmt:nextAmt,
       qty:(ratePc?ratePc.toFixed(2).replace(/\.?0+$/,'')+'%':''),
-      desc:nextTxt
+      desc:''
     };
   });
+}
+// 国债下一次付息一览：只列 T-Note（I-Bond 是复利滚进本金，不产生现金）
+function renderNextPayments(){
+  const rows=DATA.bond.groups[0].holdings
+    .filter(function(x){ return x.btype==='T-Note' && x.nextDate && x.nextAmt>0; })
+    .sort(function(a,b){ return a.nextDate<b.nextDate?-1:1; });
+  if(!rows.length) return '';
+  const total=rows.reduce(function(s,x){ return s+x.nextAmt; },0);
+  return '<div class="stkgroup" style="background:var(--bond-bg);border-color:var(--bond-ln);margin-top:14px">'+
+    '<div class="stkgroup-head" style="background:var(--bond-bg)">'+
+      '<span class="stkbar" style="background:var(--bond)"></span>'+
+      '<div class="stkcat">Next payment</div>'+
+      '<span class="stkpc" style="color:var(--bond)">$'+total.toFixed(2)+'</span>'+
+    '</div><div class="stkrows">'+
+    rows.map(function(x){
+      return '<div class="row">'+
+        '<div class="tk" style="width:auto;flex:1"><div class="sym" style="font-size:13px">'+x.sym+'</div></div>'+
+        '<div class="num" style="flex:none;width:96px;text-align:right;font-size:12px;color:var(--ink-2)">'+
+          x.nextDate.replace(/-/g,'/')+'</div>'+
+        '<div class="val" style="min-width:78px"><div class="mv">$'+x.nextAmt.toFixed(2)+'</div></div></div>';
+    }).join('')+'</div></div>';
 }
 function calcMaturity(startStr, termYears){
   if(!startStr||!termYears) return '';
@@ -1166,7 +1179,7 @@ function openDetail(k, keepScroll){
   });
 
   if(k==='cd')   html+='<div id="cdAddWrap"></div>';
-  if(k==='bond') html+='<div id="bondAddWrap"></div>';
+  if(k==='bond') html+=renderNextPayments()+'<div id="bondAddWrap"></div>';
   if(k==='hsa')  html+='<div id="simpleAddWrap"></div>';
   if(k==='stock')html+='<div id="stockAddWrap"></div>';
   if(c.ledger)   html+='<div id="incomeWrap"></div>';
@@ -1276,7 +1289,7 @@ function renderCdAdd(){
 }
 function cdFormHtml(vals, isEdit){
   vals=vals||{};
-  const selStyle='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  const selStyle='';
   return '<div class="editform">'+
       '<div class="fld"><label>账户名</label>'+
         '<input id="f-name" value="'+(vals.sym||'')+'" placeholder="例：CD-1234" autocomplete="off"></div>'+
@@ -1411,7 +1424,7 @@ function renderBondAdd(){
 }
 function bondFormHtml(vals, isEdit){
   vals=vals||{};
-  const selStyle='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  const selStyle='';
   const btype=vals.btype||'T-Note';
   const term=vals.term||3;
   function typeOpt(v){ return '<option value="'+v+'"'+(btype===v?' selected':'')+'>'+v+'</option>'; }
@@ -1757,7 +1770,7 @@ function showBuyStockForm(){
       '<div class="fld"><label>股数</label>'+
         '<input id="bs-sh" type="number" inputmode="decimal" placeholder="例：10"></div>'+
       '<div class="fld"><label>类别</label>'+
-        '<select id="bs-cat" style="'+selStyle+'">'+
+        '<select id="bs-cat">'+
           STOCK_CATS.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('')+
         '</select></div>'+
       '<div class="btns">'+
@@ -2004,15 +2017,20 @@ function renderTransfer(){
         '<div style="font-size:11px;color:var(--ink-2)">Marcus OS</div>'+
         '<div class="num" style="font-size:17px;font-weight:650">$'+fmt(marcus)+'</div></div>'+
     '</div>'+
-    '<div style="font-size:13px;font-weight:600;color:var(--ink);margin:12px 2px 6px">一次性转账</div>'+
-    '<div class="editform" style="border-color:var(--cash-ln);margin-top:0;padding:12px">'+
-      transferFormFields('o', false)+
-      '<div class="btns"><button class="save" style="background:var(--cash)" onclick="submitOneTime()">确认转账</button></div>'+
-    '</div>'+
-    '<div style="font-size:13px;font-weight:600;color:var(--ink);margin:12px 2px 6px">定期转账<span style="font-weight:400;color:var(--ink-faint)"> · 到期自动执行</span></div>'+
-    '<div class="editform" style="border-color:var(--retire-ln);margin-top:0;padding:12px">'+
-      transferFormFields('r', true)+
-      '<div class="btns"><button class="save" style="background:var(--retire)" onclick="submitRecurring()">保存定期转账</button></div>'+
+    // 左右两栏：左＝一次性，右＝定期
+    '<div style="display:flex;gap:8px;align-items:flex-start">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:12px;font-weight:600;color:var(--ink);margin:0 2px 6px">一次性转账</div>'+
+        '<div class="editform" style="border-color:var(--cash-ln);margin-top:0">'+
+          transferFormFields('o', false)+
+          '<div class="btns"><button class="save" style="background:var(--cash)" onclick="submitOneTime()">确认转账</button></div>'+
+        '</div></div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:12px;font-weight:600;color:var(--ink);margin:0 2px 6px">定期转账</div>'+
+        '<div class="editform" style="border-color:var(--retire-ln);margin-top:0">'+
+          transferFormFields('r', true)+
+          '<div class="btns"><button class="save" style="background:var(--retire)" onclick="submitRecurring()">保存</button></div>'+
+        '</div></div>'+
     '</div>';
   if(rec.length){
     html+='<div class="group"><div class="grp-head"><div class="cat">已设置的定期转账</div></div>'+
@@ -2029,8 +2047,7 @@ function renderTransfer(){
   }
   body.innerHTML=html;
 }
-const XFER_SEL='width:100%;border:1px solid var(--line);border-radius:10px;background:#fafbfc;'+
-  'padding:11px 12px;font-size:16px;color:var(--ink);font-family:inherit;-webkit-appearance:none';
+const XFER_SEL='';
 function transferFormFields(p, withFreq){
   let h='<div class="fld" style="margin-bottom:8px"><label>From</label>'+
       '<select id="'+p+'-src" style="'+XFER_SEL+'">'+SRC_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
@@ -2249,7 +2266,7 @@ function renderExpenseDrill(body){
 
 function ledgerFormHtml(v, isEdit){
   v=v||{};
-  const st='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  const st='';
   const cat=v.category||(expenseDrill&&expenseDrill!=='__ALL__'?expenseDrill:EXP_CATS[0]);
   const kind=catKind(cat);
   const INCOME_CATS=['Income · Payroll','Income · Bonus','Income · 国债利息','Income · 调整'];
@@ -2366,7 +2383,7 @@ function deleteLedgerRow(row, expectAmount){
 function showPayrollForm(){
   const cfg=loadIncome(); const p=cfg.payroll||{};
   const freq=p.freq||'biweekly';
-  const selStyle='width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc;font-size:16px;font-family:inherit';
+  const selStyle='';
   function fOpt(v,label){ return '<option value="'+v+'"'+(freq===v?' selected':'')+'>'+label+'</option>'; }
   document.getElementById('incomeFormWrap').innerHTML=
     '<div class="editform" style="border-color:var(--cash-ln)">'+
@@ -2427,8 +2444,7 @@ function showReconcileForm(){
   const wrap=document.getElementById('incomeFormWrap');
   if(!wrap) return;
   if(wrap.innerHTML){ wrap.innerHTML=''; return; }
-  const st='width:100%;border:1px solid var(--line);border-radius:10px;background:#fafbfc;'+
-    'padding:11px 12px;font-size:16px;color:var(--ink);font-family:inherit;-webkit-appearance:none';
+  const st='';
   wrap.innerHTML=
     '<div class="editform" style="border-color:var(--cash-ln)">'+
       '<div style="font-size:15px;font-weight:600;margin-bottom:4px">手动修改余额</div>'+
