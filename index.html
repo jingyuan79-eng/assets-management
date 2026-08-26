@@ -2004,33 +2004,36 @@ function nextXferDate(r){
   while(d<=today && guard++<400){ d=nextByFreq(d, freq); }
   return fmtD(d).replace(/-/g,'/');
 }
+let xferMode='once';   // once / recurring
+function setXferMode(m){ xferMode=m; renderTransfer(); }
+function submitTransfer(){ (xferMode==='recurring')?submitRecurring():submitOneTime(); }
 function renderTransfer(){
   const body=document.getElementById('transfer-body');
   const chase=sourceBalance('chase'), marcus=sourceBalance('marcus');
   const rec=loadRecurring();
+  const isRec=(xferMode==='recurring');
   let html=
     '<div style="display:flex;gap:8px;margin-bottom:10px">'+
       '<div style="flex:1;background:var(--cash-bg);border-radius:14px;padding:10px 12px">'+
-        '<div style="font-size:11px;color:var(--ink-2)">流动现金</div>'+
+        '<div style="font-size:11px;color:var(--ink-2)">Checking-Chase</div>'+
         '<div class="num" style="font-size:17px;font-weight:650">$'+fmt(chase)+'</div></div>'+
       '<div style="flex:1;background:var(--cd-bg);border-radius:14px;padding:10px 12px">'+
         '<div style="font-size:11px;color:var(--ink-2)">Marcus OS</div>'+
         '<div class="num" style="font-size:17px;font-weight:650">$'+fmt(marcus)+'</div></div>'+
     '</div>'+
-    // 左右两栏：左＝一次性，右＝定期
-    '<div style="display:flex;gap:8px;align-items:flex-start">'+
-      '<div style="flex:1;min-width:0">'+
-        '<div style="font-size:12px;font-weight:600;color:var(--ink);margin:0 2px 6px">一次性转账</div>'+
-        '<div class="editform" style="border-color:var(--cash-ln);margin-top:0">'+
-          transferFormFields('o', false)+
-          '<div class="btns"><button class="save" style="background:var(--cash)" onclick="submitOneTime()">确认转账</button></div>'+
-        '</div></div>'+
-      '<div style="flex:1;min-width:0">'+
-        '<div style="font-size:12px;font-weight:600;color:var(--ink);margin:0 2px 6px">定期转账</div>'+
-        '<div class="editform" style="border-color:var(--retire-ln);margin-top:0">'+
-          transferFormFields('r', true)+
-          '<div class="btns"><button class="save" style="background:var(--retire)" onclick="submitRecurring()">保存</button></div>'+
-        '</div></div>'+
+    '<div class="editform" style="border-color:'+(isRec?'var(--retire-ln)':'var(--cash-ln)')+';margin-top:0">'+
+      // 顶部两个切换按钮
+      '<div style="display:flex;gap:8px;margin-bottom:10px">'+
+        '<button onclick="setXferMode(\'once\')" style="flex:1;border:none;border-radius:10px;padding:9px;'+
+          'font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;'+
+          (isRec?'background:#eceef2;color:var(--ink-2)':'background:var(--cash-bg);color:var(--cash)')+'">一次性转账</button>'+
+        '<button onclick="setXferMode(\'recurring\')" style="flex:1;border:none;border-radius:10px;padding:9px;'+
+          'font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;'+
+          (isRec?'background:var(--retire-bg);color:var(--retire)':'background:#eceef2;color:var(--ink-2)')+'">定期转账</button>'+
+      '</div>'+
+      transferFormFields('x', isRec)+
+      '<div class="btns"><button class="save" style="background:'+(isRec?'var(--retire)':'var(--cash)')+'" '+
+        'onclick="submitTransfer()">确认</button></div>'+
     '</div>';
   if(rec.length){
     html+='<div class="group"><div class="grp-head"><div class="cat">已设置的定期转账</div></div>'+
@@ -2067,9 +2070,9 @@ function transferFormFields(p, withFreq){
   return h;
 }
 function submitOneTime(){
-  const src=document.getElementById('o-src').value;
-  const tgt=document.getElementById('o-tgt').value;
-  const amt=parseFloat(document.getElementById('o-amt').value);
+  const src=document.getElementById('x-src').value;
+  const tgt=document.getElementById('x-tgt').value;
+  const amt=parseFloat(document.getElementById('x-amt').value);
   if(!(amt>0)){ alert('请输入金额'); return; }
   if(tgt==='broker' && !syncOk){
     if(!confirm('当前与 Google Sheet 同步失败。\n此时转入券商现金可能在下次同步时被覆盖。\n仍要继续吗？')) return;
@@ -2080,11 +2083,11 @@ function submitOneTime(){
   alert('已转账 $'+fmt(amt)+'：'+optName(SRC_OPTS,src)+' → '+optName(TGT_OPTS,tgt));
 }
 function submitRecurring(){
-  const src=document.getElementById('r-src').value;
-  const tgt=document.getElementById('r-tgt').value;
-  const amt=parseFloat(document.getElementById('r-amt').value);
-  const freq=document.getElementById('r-freq').value;
-  const start=document.getElementById('r-start').value;
+  const src=document.getElementById('x-src').value;
+  const tgt=document.getElementById('x-tgt').value;
+  const amt=parseFloat(document.getElementById('x-amt').value);
+  const freq=document.getElementById('x-freq').value;
+  const start=document.getElementById('x-start').value;
   if(!(amt>0)){ alert('请输入金额'); return; }
   if(!start){ alert('请选择首次转账日'); return; }
   const list=loadRecurring();
