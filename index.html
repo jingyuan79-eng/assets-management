@@ -495,17 +495,26 @@ function syncStockFromSheet(){
       rebuildBonds(data.bond);
       notices = data.notices || [];
       syncOk = true;
-      // 固定支出：把本月该记的自动写进 Ledger（Sheet 端按 key 去重）
-      return runFixedExpenses().then(function(){
-        rebuildMonthExpense();
-        runPayroll();
-        runRecurring();
-        setSyncBadge('ok');
-        recompute();
-        renderNotices();
-        if(document.getElementById('cashTabBody')) renderCashTabBody();
-        refreshOpenDetail();
-      });
+      // 先把界面刷出来：渲染要用的数据这一个响应里已经全了，
+      // 不该被下面那串串行的补记写操作挡住（每笔都是一次 Apps Script 往返）。
+      rebuildMonthExpense();
+      setSyncBadge('ok');
+      recompute();
+      renderNotices();
+      if(document.getElementById('cashTabBody')) renderCashTabBody();
+      refreshOpenDetail();
+
+      // 固定支出 / 工资 / 定期转账：后台补记，写完再刷一次（Sheet 端按 key 去重）
+      return runFixedExpenses()
+        .then(function(){ return runPayroll(); })
+        .then(function(){
+          runRecurring();
+          rebuildMonthExpense();
+          recompute();
+          renderNotices();
+          if(document.getElementById('cashTabBody')) renderCashTabBody();
+          refreshOpenDetail();
+        });
     })
     .catch(function(e){
       console.log('sheet sync failed', e);
