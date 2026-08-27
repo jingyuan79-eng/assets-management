@@ -473,7 +473,8 @@ function adjustBrokerCash(delta){
   const d=Math.round(delta*100)/100;
   if(!d) return Promise.resolve();
   const bc=brokerCashItem();
-  if(bc){ bc.mv=Math.round((bc.mv||0)+d); saveBrokerCash(bc.mv); persistStock(); }
+  if(bc){ bc.mv=Math.round((bc.mv||0)+d); saveBrokerCash(bc.mv); persistStock();
+          recompute(); refreshOpenDetail(); }
   return apiWrite({action:'adjustCash', delta:d});
 }
 
