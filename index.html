@@ -422,6 +422,14 @@ function setSyncBadge(state, extra){
   if(!el) return;
   el.classList.remove('err');
   if(state==='loading'){ el.textContent='同步中…'; }
+  else if(state==='stale'){
+    // 屏幕上是缓存数据：把数据时点写出来，当天只显示时分，隔天显示日期
+    const t=new Date(extra||Date.now()), n=new Date();
+    const sameDay = t.toDateString()===n.toDateString();
+    el.textContent = (sameDay
+        ? '上次同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')
+        : '数据为 '+(t.getMonth()+1)+'/'+t.getDate())+' · 更新中…';
+  }
   else if(state==='ok'){
     const t=new Date();
     el.textContent='已同步 '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
@@ -463,6 +471,40 @@ function apiWrite(payload){
   return sheetQueue;
 }
 const pushToSheet = apiWrite;   // 兼容旧调用点
+
+// ---- 本地缓存：上次同步成功的 Sheet 数据 ----
+// 股票一直有 stockGroups_v2 垫底，所以打开即出数；现金/储蓄/国债没有，
+// 每次都要空等一次网络往返。这里给它们补上同样的垫底数据。
+// 原则：可以先显示旧数字，但必须让人一眼看出这是旧的 —— 徽标会标明数据时点，
+// 新数据一到就覆盖。绝不让过期余额冒充实时余额。
+const CACHE_KEY = 'sheetCache_v1';
+let cacheTs = 0;                // >0 表示当前屏幕上是缓存数据；拿到新数据后归 0
+function saveSheetCache(data){
+  try{
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      ts: Date.now(),
+      savings: data.savings, bond: data.bond, cash: data.cash,
+      ledger: data.ledger, monthly: data.monthly,
+      ledgerMonths: data.ledgerMonths, notices: data.notices
+    }));
+  }catch(e){ console.log('缓存写入失败', e); }   // 隐私模式下 setItem 会抛异常
+}
+function loadSheetCache(){
+  let c=null;
+  try{ c=JSON.parse(localStorage.getItem(CACHE_KEY)||'null'); }catch(e){}
+  if(!c || !c.cash) return false;
+  cacheTs = c.ts || 0;
+  ledgerRows   = Array.isArray(c.ledger) ? c.ledger : [];
+  monthlyTotals= c.monthly || {};
+  ledgerMonths = c.ledgerMonths || [];
+  notices      = c.notices || [];
+  setCashFromServer(c.cash);
+  rebuildSavings(c.savings);
+  rebuildBonds(c.bond);
+  rebuildMonthExpense();
+  return true;
+}
+
 function syncStockToSheet(it){
   if(!it) return;
   apiWrite({action:'updateStock', symbol:normSym(it.sym),
@@ -480,7 +522,8 @@ function adjustBrokerCash(delta){
 
 // ---- 读 Sheet ----
 function syncStockFromSheet(){
-  setSyncBadge('loading');
+  // 屏幕上已经有缓存数据时，徽标要显示它的时点，而不是笼统的「同步中…」
+  setSyncBadge(cacheTs ? 'stale' : 'loading', cacheTs);
   return fetch(SHEET_API+'?_t='+Date.now())
     .then(function(r){ return r.json(); })
     .then(function(data){
@@ -495,6 +538,8 @@ function syncStockFromSheet(){
       rebuildBonds(data.bond);
       notices = data.notices || [];
       syncOk = true;
+      cacheTs = 0;                // 拿到新数据，屏幕上不再是缓存
+      saveSheetCache(data);       // 供下次打开垫底
       // 先把界面刷出来：渲染要用的数据这一个响应里已经全了，
       // 不该被下面那串串行的补记写操作挡住（每笔都是一次 Apps Script 往返）。
       rebuildMonthExpense();
@@ -1415,6 +1460,8 @@ function refreshFromSheet(){
         ledgerRows = Array.isArray(data.ledger) ? data.ledger : ledgerRows;
         monthlyTotals = data.monthly || monthlyTotals;
         notices = data.notices || [];
+        cacheTs = 0;
+        saveSheetCache(data);
         rebuildMonthExpense();
         recompute();
         renderNotices();
@@ -2531,8 +2578,10 @@ function go(id){
 }
 
 // ==================== 启动 ====================
+const hadCache = loadSheetCache();   // 先把上次的现金/储蓄/国债填进去，避免空等一次往返
 renderOverview();        // 先用本地数据渲染，避免白屏
 renderPropPage();
+if(hadCache) setSyncBadge('stale', cacheTs);   // 明确标出：这是旧数据，正在更新
 syncStockFromSheet();    // 再拉 Sheet：结算固定支出、按月对账、工资、定期转账
 
 </script>
