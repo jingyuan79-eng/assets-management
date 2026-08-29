@@ -1,0 +1,12 @@
+{
+  "name": "assets-management",
+  "version": "1.0.0",
+  "private": true,
+  "description": "资产驾驶舱 · 测试工程（前端 index.html + 后端 AppsScript.gs 均为单文件，无构建）",
+  "scripts": {
+    "test": "bash run-all.sh"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}
