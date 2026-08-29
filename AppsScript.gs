@@ -1,12 +1,36 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  v2  (2026-08-23)
+ * 资产驾驶舱 · Google Apps Script 后端  v4  (2026-08-29)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
  * 部署设置：Execute as = Me，Who has access = Anyone
  * 时区：America/Phoenix（Arizona 不用夏令时）
  *
- * 本版新增：
+ * ── 改动记录（每次改代码请在最上方补一条，旧条目保留）──────────────
+ *
+ * v4  2026-08-29  清理与正确性
+ *   · 修：monthly / expense / monthEnd 的日期解析改用 s2d（本地午夜），
+ *         与 sumLedgerSigned 一致。原来用 new Date(字符串) 按 UTC 解析，
+ *         文本格式的日期会在月份边界差一天。非 ISO 文本仍有兜底
+ *   · 优化：runSavings / runBonds 改用 needId 标记，省掉每行 1 次
+ *          「ID 是否为空」的读取（每次打开约 5 次读）
+ *   · 删：readAnchor —— v3 重构留下的兼容包装，无人调用
+ *   · 删：readAllInner 里 now / ym / prev / prevYm 的重复赋值
+ *
+ * v3  2026-08-27  性能（前端需同时上线，见下方 70 天窗口）
+ *   · Anchor 整表只读一次：新增 readAnchorRows / anchorLatest /
+ *     anchorBookStart，原先一次请求要读 4 遍
+ *   · Ledger 全表只读一次：新增 sumSignedRows，computeCash 支持传入
+ *     已读数据；原先 readAllInner 和 computeCash 各扫一遍全表
+ *   · runSavings / runBonds 返回内存中已回写的 rows，不再整表重读
+ *   · writeSavRow / writeBondRow 改为整行 setValues：5 次 / 4 次往返 → 各 1 次。
+ *     不由本函数计算的列从 raw 原样带回（注意：调用前不可单独 setValue）
+ *   · updateSaving 配合改为写 r.raw，4 次往返 → 1 次
+ *   · ledger 明细窗口加宽到 70 天，盖过前端 60 天的补记判断窗口，
+ *     消除每次打开重发已写过 key 的空请求（实测平均 4.5 次/打开 → 0）
+ *   · 实测：平常日打开 表读取 22→16 写入 6→3；结息日 19→13 写入 21→6
+ *
+ * v2  2026-08-23  记账双向读写
  *   · Ledger 支持 改 / 删 / 按指定日期补记（小程序双向读写）
  *   · Ledger 增加 D:note（备注）、E:key（防重复键）两列
  *   · 固定支出自动记账用 key 去重，多设备打开也不会重复写
@@ -229,7 +253,6 @@ function anchorBookStart(rows) {
   }
   return first ? new Date(first.getFullYear(), first.getMonth(), 1) : null;
 }
-function readAnchor(ss) { return anchorLatest(readAnchorRows(ss)); }
 function addAnchorRow(ss, dateStr, amount, note) {
   anchorSheet(ss).appendRow([dateStr, Math.round(amount * 100) / 100, note || ""]);
 }
@@ -417,7 +440,10 @@ function runSavings(ss) {
 
   rows.forEach(function (r) {
     if (r.closed) return;
-    if (!r.id) r.id = newSavId();
+    // 先记下「原本就没有 ID」，下一行会把它填上。之前是靠回读单元格判断，
+    // 每行多一次读；没到结息日时 changed 为 false，恰好每次打开都要付这笔钱。
+    var needId = !r.id;
+    if (needId) r.id = newSavId();
     var changed = false;
 
     // 按月推进：每次结到「下月 1 号」，不超过到期日
@@ -447,7 +473,7 @@ function runSavings(ss) {
                      Math.round(payout).toLocaleString("en-US") + "（未找到 OS 账户，请手动处理）");
       }
     }
-    if (changed || !sh.getRange(r.row, SAV_COL.ID).getValue()) writeSavRow(sh, r);
+    if (changed || needId) writeSavRow(sh, r);
   });
 
   notices.forEach(function (t) { addNotice(ss, t); });
@@ -632,7 +658,8 @@ function runBonds(ss, bookIn) {
 
   rows.forEach(function (r) {
     if (r.closed) return;
-    if (!r.id) r.id = newBondId();
+    var needId = !r.id;
+    if (needId) r.id = newBondId();
     var changed = false;
 
     // 半年一次的付息 / 复利
@@ -671,7 +698,7 @@ function runBonds(ss, bookIn) {
       r.closed = true;
       changed = true;
     }
-    if (changed || !sh.getRange(r.row, BOND_COL.ID).getValue()) writeBondRow(sh, r);
+    if (changed || needId) writeBondRow(sh, r);
   });
   // rows 已经是回写后的状态，不必再整表读一遍
   return bondOut(rows);
@@ -917,16 +944,15 @@ function readAllInner(force) {
   var lg = ss.getSheetByName("Ledger");
   if (lg) {
     var lv = lg.getDataRange().getValues();
-    now = new Date();
-    ym = ymOf(now);
-    prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    prevYm = ymOf(prev);
 
     for (var j = 1; j < lv.length; j++) {
       var d = lv[j][0];
       if (!d) continue;
       // 注意：Apps Script 中 d instanceof Date 不可靠，必须用 toString.call
-      var dateObj = (Object.prototype.toString.call(d) === '[object Date]') ? d : new Date(d);
+      // 字符串一律走 s2d（本地午夜），和 sumLedgerSigned / sumSignedRows 保持同一套
+      // 解析。原先用 new Date(字符串) 是按 UTC 解析，文本日期会在月份边界差一天。
+      var dateObj = (Object.prototype.toString.call(d) === '[object Date]') ? d : s2d(d);
+      if (!dateObj || isNaN(dateObj.getTime())) dateObj = new Date(d);   // 非 ISO 文本兜底
       if (isNaN(dateObj.getTime())) continue;
 
       var ds = Utilities.formatDate(dateObj, TZ, "yyyy-MM-dd");

@@ -228,7 +228,10 @@
    8. 支出金额被改小时会把钱加回 Chase
    ============================================================ */
 
-const ASOF = new Date().toISOString().slice(0,10);
+// 右上角日期。原来写的是 new Date().toISOString()，取的是 UTC 日期——
+// 亚利桑那是 UTC-7，本地下午 5 点后就会显示成明天。改用本地当天；
+// 同步成功后换成后端返回的 serverDate（按 America/Phoenix 生成，权威值）。
+let ASOF = fmtD(todayD());
 
 // ==================== 数据骨架 ====================
 const DATA = {
@@ -244,15 +247,14 @@ const DATA = {
   },
   bond: {
     name:"国债", color:"var(--bond)", key:"bond", meta:"TreasuryDirect · 均 3.98%",
-    groups:[ { cat:"美国国债", sub:"", holdings:[
-      {sym:"T-Notes", rate:3.75, mat:"2027-08-15", baseMv:10000, updated:"2026-07-31"},
-      {sym:"I Bond",  rate:4.26, mat:"2056-01-01", baseMv:8000,  updated:"2026-07-31"},
-    ]}]
+    // 数据全部来自 Sheet 的 Bond 表，本地不留种子（同 cd）：
+    // 首次安装宁可显示 $0，也不要闪一下写死的旧数字
+    groups:[ { cat:"美国国债", sub:"", holdings:[] }]
   },
   cash: {
     name:"现金", color:"var(--cash)", key:"cash", meta:"",
     groups:[ { cat:"操作账户", sub:"", holdings:[
-      {sym:"Chase", qty:"~0%", desc:"日常操作账户", mv:10000},
+      {sym:"Chase", qty:"~0%", desc:"日常操作账户", mv:0},   // 由 Sheet 的 cash.balance 覆盖
     ]}],
     ledger:true
   },
@@ -470,7 +472,6 @@ function apiWrite(payload){
   });
   return sheetQueue;
 }
-const pushToSheet = apiWrite;   // 兼容旧调用点
 
 // ---- 本地缓存：上次同步成功的 Sheet 数据 ----
 // 股票一直有 stockGroups_v2 垫底，所以打开即出数；现金/储蓄/国债没有，
@@ -539,6 +540,7 @@ function syncStockFromSheet(){
       notices = data.notices || [];
       syncOk = true;
       cacheTs = 0;                // 拿到新数据，屏幕上不再是缓存
+      if(data.serverDate) ASOF = data.serverDate;   // 服务器日期，不受本机时区影响
       saveSheetCache(data);       // 供下次打开垫底
       // 先把界面刷出来：渲染要用的数据这一个响应里已经全了，
       // 不该被下面那串串行的补记写操作挡住（每笔都是一次 Apps Script 往返）。
@@ -1747,7 +1749,7 @@ function applySell(){
   if(soldOut){
     DATA.stock.groups[curStock.gi].holdings.splice(curStock.hi,1);
     afterStockChange();
-    pushToSheet({action:'deleteStock', symbol:sym});   // 队列保证先删行、再写现金
+    apiWrite({action:'deleteStock', symbol:sym});   // 队列保证先删行、再写现金
   }else{
     it.shares=it.shares-sh;
     if(px>0) it.price=px;
@@ -1771,7 +1773,7 @@ function deleteStock(){
   const sym=normSym(it.sym);
   DATA.stock.groups[curStock.gi].holdings.splice(curStock.hi,1);
   afterStockChange();
-  pushToSheet({action:'deleteStock', symbol:sym});
+  apiWrite({action:'deleteStock', symbol:sym});
 }
 function afterStockChange(){
   DATA.stock.groups = DATA.stock.groups.filter(function(g){ return g.holdings.length>0; });
@@ -1870,7 +1872,7 @@ function submitBuyStock(){
   const sheetCat=(STOCK_TAXONOMY.find(function(t){return t.cat===cat;})||{}).sheet||'Other ETF';
   if(existing){ syncStockToSheet(existing); }
   else{
-    pushToSheet({action:'addStock', symbol:sym, category:sheetCat,
+    apiWrite({action:'addStock', symbol:sym, category:sheetCat,
                  shares:Number(sh.toFixed(4)), cost:Number(cost.toFixed(4))});
   }
   adjustBrokerCash(-need);
