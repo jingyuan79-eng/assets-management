@@ -401,13 +401,14 @@ function rebuildMonthExpense(){
 function rebuildMonthTotals(){
   const months=(ledgerMonths&&ledgerMonths.length)?ledgerMonths:[curYm()];
   const acc={};
-  months.forEach(function(ym){ acc[ym]={income:0,expense:0,transfer:0,redeem:0}; });
+  months.forEach(function(ym){ acc[ym]={income:0,expense:0,transfer:0,redeem:0,hsaIn:0,hsaOut:0}; });
   ledgerRows.forEach(function(r){
     const ym=(r.date||'').slice(0,7);
     if(!acc[ym]) return;
     const amt=parseFloat(r.amount)||0;
     const k=catKind(r.category);
-    if(k==='income') acc[ym].income+=amt;
+    if(k==='hsa'){ if(hsaKind(r.category)==='in') acc[ym].hsaIn+=amt; else acc[ym].hsaOut+=amt; }
+    else if(k==='income') acc[ym].income+=amt;
     else if(k==='transfer') acc[ym].transfer+=amt;
     else if(k==='redeem') acc[ym].redeem+=amt;
     else acc[ym].expense+=amt;
@@ -548,7 +549,7 @@ function syncStockFromSheet(){
       setSyncBadge('ok');
       recompute();
       renderNotices();
-      if(document.getElementById('cashTabBody')) renderCashTabBody();
+      refreshLedgerViews();
       refreshOpenDetail();
 
       // 固定支出 / 工资 / 定期转账：后台补记，写完再刷一次（Sheet 端按 key 去重）
@@ -559,7 +560,7 @@ function syncStockFromSheet(){
           rebuildMonthExpense();
           recompute();
           renderNotices();
-          if(document.getElementById('cashTabBody')) renderCashTabBody();
+          refreshLedgerViews();
           refreshOpenDetail();
         });
     })
@@ -615,14 +616,21 @@ function rebuildStockGroups(rows){
 // 本地编辑时先按增量调整，等下次同步再对齐。不再有「已扣多少」这种状态。
 let cashInfo = { balance:0, anchorDate:'', anchorAmount:0, hasAnchor:false };
 
+// 规则必须与 AppsScript.gs 的 catKind 保持一致
 function catKind(cat){
   const c=(cat||'').toString().trim();
+  // HSA 必须最先判断：「HSA · Income · 供款」也要归到 hsa，不能被 Income 分支截走
+  if(c.indexOf('HSA')===0) return 'hsa';          // HSA 账户内部流水：不碰流动现金
   if(c.indexOf('Income')===0) return 'income';    // 真收入：工资、利息、分红
   if(c.indexOf('Redeem')===0) return 'redeem';    // 本金回流：加现金但不算收入
   if(c.indexOf('Transfer')===0) return 'transfer';
   return 'expense';
 }
-function catSign(cat){ const k=catKind(cat); return (k==='income'||k==='redeem')?1:-1; }
+// HSA 流水内部再分收支：带 Income 的是供款/雇主补助，其余是医疗开销
+function hsaKind(cat){ return (cat||'').toString().indexOf('Income')>=0 ? 'in' : 'out'; }
+// HSA 的钱走独立账户，不从 Chase 出，所以对流动现金的贡献是 0
+function catSign(cat){ const k=catKind(cat); if(k==='hsa') return 0;
+                       return (k==='income'||k==='redeem')?1:-1; }
 function signedOf(r){ return catSign(r.category)*(parseFloat(r.amount)||0); }
 
 // 记账起始日之前的账都已含在初始余额里，不补录
@@ -1237,7 +1245,7 @@ function openDetail(k, keepScroll){
 
   if(k==='cd')   html+='<div id="cdAddWrap"></div>';
   if(k==='bond') html+=renderNextPayments()+'<div id="bondAddWrap"></div>';
-  if(k==='hsa')  html+='<div id="simpleAddWrap"></div>';
+  if(k==='hsa')  html+='<div id="simpleAddWrap"></div><div id="hsaWrap"></div>';
   if(k==='stock')html+='<div id="stockAddWrap"></div>';
   if(c.ledger)   html+='<div id="incomeWrap"></div>';
 
@@ -1245,7 +1253,7 @@ function openDetail(k, keepScroll){
   if(k==='cd')   renderCdAdd();
   if(k==='bond') renderBondAdd();
   if(k==='stock')renderStockAdd();
-  if(k==='hsa')  renderSimpleAdd('hsa');
+  if(k==='hsa'){ renderSimpleAdd('hsa'); renderHsa(); }
   if(k==='cash') renderIncome();
   if(!keepScroll) go('detail');
 }
@@ -1886,6 +1894,67 @@ function renderSimpleAdd(cls){
   if(wrap) wrap.innerHTML='';
   editingSimple={cls:null, idx:-1};
 }
+
+// ==================== HSA 收入 / 支出（简化版现金页）====================
+// HSA 的钱走独立账户，不碰流动现金，所以这里只看 category 以 HSA · 开头的流水。
+// 收入 = 供款 + 雇主补助（带 Income），支出 = 医疗开销。
+let hsaTab='ex';
+function switchHsaTab(t){ hsaTab=t; editingLedgerRow=null; renderHsa(); }
+function hsaRows(dir){
+  const ym=curYm();
+  return ledgerRows.filter(function(r){
+    return (r.date||'').slice(0,7)===ym
+        && catKind(r.category)==='hsa' && hsaKind(r.category)===dir;
+  }).sort(function(a,b){ return (a.date<b.date?1:a.date>b.date?-1:b.row-a.row); });
+}
+function hsaTotal(dir){
+  return hsaRows(dir).reduce(function(s,r){ return s+(parseFloat(r.amount)||0); },0);
+}
+function renderHsa(){
+  const wrap=document.getElementById('hsaWrap');
+  if(!wrap) return;
+  wrap.innerHTML=
+    '<div class="cashtabs">'+
+      '<div class="cashtab '+(hsaTab==='in'?'on-in':'')+'" onclick="switchHsaTab(\'in\')">收入</div>'+
+      '<div class="cashtab '+(hsaTab==='ex'?'on-ex':'')+'" onclick="switchHsaTab(\'ex\')">支出</div>'+
+    '</div>'+
+    '<div style="margin:2px 2px 10px;font-size:12px;color:var(--ink-faint);font-weight:600">'+monthLabel()+'</div>'+
+    '<div id="hsaTabBody"></div>';
+  renderHsaTabBody();
+}
+function renderHsaTabBody(){
+  const body=document.getElementById('hsaTabBody');
+  if(!body) return;
+  const dir=(hsaTab==='in')?'in':'out';
+  const rows=hsaRows(dir), total=hsaTotal(dir);
+  const isIn=(dir==='in');
+  let h='<div style="border-radius:14px;padding:11px 12px;background:'+
+        (isIn?'var(--cash-bg)':'var(--hsa-bg)')+';text-align:center">'+
+    '<div style="font-size:11px;color:'+(isIn?'var(--cash)':'var(--hsa)')+';font-weight:600">'+
+      (isIn?'本月存入':'本月医疗开销')+'</div>'+
+    '<div class="num" style="font-size:16px;font-weight:650;color:var(--ink);margin-top:2px">$'+
+      fmt(total)+'</div></div>';
+  h+='<div style="display:flex;align-items:baseline;margin:18px 2px 8px">'+
+    '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">'+
+      (isIn?'本月存入明细':'本月开销明细')+'</div>'+
+    '<div class="num" style="font-size:12px;color:var(--ink-faint)">'+rows.length+' 笔</div></div>';
+  if(!rows.length){
+    h+='<div class="placeholder">'+(isIn?'本月还没有 HSA 存入记录':'本月还没有 HSA 开销记录')+'</div>';
+  }else{
+    h+='<div class="group">'+rows.map(function(r){
+      // 「HSA · Income · 供款」→「供款」；「HSA · Health & Beauty」→「Health & Beauty」
+      const label=(r.category||'').replace(/^HSA · (Income · )?/,'');
+      return '<div class="row" style="cursor:pointer" onclick="editLedger('+r.row+')">'+
+        '<div class="tk" style="width:auto;flex:1">'+
+          '<div class="sym" style="font-size:13px">'+(r.note||label)+'</div>'+
+          '<div class="qty">'+(r.date||'').replace(/-/g,'/')+' · '+label+'</div></div>'+
+        '<div class="val"><div class="mv" style="color:'+(isIn?'var(--pos)':'var(--neg)')+'">'+
+          (isIn?'+':'−')+'$'+(parseFloat(r.amount)||0).toFixed(2)+'</div></div></div>'+
+        '<div class="stock-slot" id="lg-'+r.row+'"></div>';
+    }).join('')+'</div>';
+  }
+  body.innerHTML=h;
+}
 function simpleFormHtml(cls,vals,isEdit){
   vals=vals||{};
   return '<div class="editform" style="border-color:var(--'+cls+'-ln)">'+
@@ -2347,13 +2416,13 @@ function ledgerFormHtml(v, isEdit){
     (isEdit?'<div class="delrow"><button class="danger" style="width:100%;border-radius:10px;padding:12px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer" onclick="deleteLedgerRow('+v.row+','+(v.amount||0)+')">删除这笔</button></div>':'')+
   '</div>';
 }
-function cancelLedgerForm(){ editingLedgerRow=null; renderCashTabBody(); }
+function cancelLedgerForm(){ editingLedgerRow=null; refreshLedgerViews(); }
 function editLedger(row){
   const r=ledgerRows.find(function(x){ return x.row===row; });
   if(!r) return;
-  if(editingLedgerRow===row){ editingLedgerRow=null; renderCashTabBody(); return; }
+  if(editingLedgerRow===row){ editingLedgerRow=null; refreshLedgerViews(); return; }
   editingLedgerRow=row;
-  renderCashTabBody();
+  refreshLedgerViews();
   const w=document.getElementById('lg-'+row);
   if(w){ w.innerHTML=ledgerFormHtml(r, true); w.scrollIntoView({behavior:'smooth',block:'center'}); }
 }
@@ -2372,12 +2441,18 @@ function readLedgerForm(){
     note:document.getElementById('lg-note').value.trim()
   };
 }
+// 流水改动后刷新「当前打开的那个明细列表」。现金页和 HSA 页共用同一批
+// ledgerRows，但各自只渲染属于自己的行，所以两边都要给机会重绘。
+function refreshLedgerViews(){
+  if(document.getElementById('cashTabBody')) renderCashTabBody();
+  if(document.getElementById('hsaTabBody'))  renderHsaTabBody();
+}
 // 乐观更新：本地先改 → 立刻刷新界面 → 后台写 Sheet；失败自动撤回
 function applyLocal(fn){
   fn();
   rebuildMonthExpense();
   recompute();
-  renderCashTabBody();
+  refreshLedgerViews();
 }
 function writeFailed(res, what){
   alert(what+'失败，已撤回本地改动：\n'+((res&&res.message)||'网络或服务器问题'));
@@ -2391,7 +2466,7 @@ function saveLedgerAdd(){
   applyLocal(function(){ ledgerRows.push(tmp); applyCashDelta(signedOf(tmp)); });
   apiWrite({action:'addLedger', date:v.date, category:v.category, amount:v.amount, note:v.note})
     .then(function(res){
-      if(res && res.status==='success'){ tmp.row=res.row; tmp.pending=false; renderCashTabBody(); }
+      if(res && res.status==='success'){ tmp.row=res.row; tmp.pending=false; refreshLedgerViews(); }
       else{ applyLocal(function(){ ledgerRows=ledgerRows.filter(function(x){ return x!==tmp; });
                                    applyCashDelta(-signedOf(tmp)); });
             writeFailed(res,'补记'); }
@@ -2434,7 +2509,7 @@ function deleteLedgerRow(row, expectAmount){
       if(res && res.status==='success'){
         // Sheet 删行后，后面所有行号上移一位，本地跟着同步，避免下次改到错行
         ledgerRows.forEach(function(x){ if(x.row>row) x.row--; });
-        renderCashTabBody();
+        refreshLedgerViews();
       }else{
         applyLocal(function(){ ledgerRows.splice(idx,0,backup); applyCashDelta(signedOf(backup)); });
         writeFailed(res,'删除');

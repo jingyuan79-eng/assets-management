@@ -8,6 +8,15 @@
  *
  * ── 改动记录（每次改代码请在最上方补一条，旧条目保留）──────────────
  *
+ * v5  2026-08-29  HSA 第一步：独立成账
+ *   · catKind 新增第 5 种资金性质 hsa（前缀 "HSA ·"），catSign 返回 0 ——
+ *     HSA 的钱走独立账户，不从 Chase 出，记进 Ledger 但不影响流动现金
+ *   · 新增 hsaKind：带 Income 的是供款/雇主补助，其余是医疗开销
+ *   · monthly 增加 hsaIn / hsaOut，与 income / expense 完全分开；
+ *     Ledger_monthly 相应新增「HSA 收入」「HSA 支出」两列
+ *   · 效果：没刷 HSA 卡的 Health & Beauty 仍留在支出板块，
+ *     刷了卡的 HSA · Health & Beauty 只进 HSA 板块，两者互不干扰
+ *
  * v4  2026-08-29  清理与正确性
  *   · 修：monthly / expense / monthEnd 的日期解析改用 s2d（本地午夜），
  *         与 sumLedgerSigned 一致。原来用 new Date(字符串) 按 UTC 解析，
@@ -206,14 +215,22 @@ function deleteLedger(ss, data) {
 // 分类前缀决定性质：Income · 加，Transfer · 减（不算支出），其余减（算支出）。
 function catKind(cat) {
   var c = (cat || "").toString().trim();
+  // HSA 必须最先判断：「HSA · Income · 供款」也要归到 hsa，不能被 Income 分支截走
+  if (c.indexOf("HSA") === 0) return "hsa";           // HSA 账户内部流水：不碰流动现金
   if (c.indexOf("Income") === 0) return "income";     // 真收入：工资、利息、分红
   if (c.indexOf("Redeem") === 0) return "redeem";     // 本金回流：加现金，但不是收入
   if (c.indexOf("Transfer") === 0) return "transfer"; // 投出去：减现金
   return "expense";
 }
+// HSA 的钱走的是独立账户，不从 Chase 出，所以对流动现金的贡献是 0
 function catSign(cat) {
   var k = catKind(cat);
+  if (k === "hsa") return 0;
   return (k === "income" || k === "redeem") ? 1 : -1;
+}
+// HSA 流水内部再分收支：带 Income 的是供款/雇主补助，其余是医疗开销
+function hsaKind(cat) {
+  return (cat || "").toString().indexOf("Income") >= 0 ? "in" : "out";
 }
 
 function anchorSheet(ss) {
@@ -962,9 +979,13 @@ function readAllInner(force) {
 
       // 每月统计：收入 / 支出 / 投资转出 分开算
       var kind = catKind(cat);
-      if (!monthly[rowYm]) monthly[rowYm] = { income: 0, expense: 0, transfer: 0, redeem: 0, payroll: 0, bonus: 0 };
+      if (!monthly[rowYm]) monthly[rowYm] = { income: 0, expense: 0, transfer: 0, redeem: 0,
+                                              payroll: 0, bonus: 0, hsaIn: 0, hsaOut: 0 };
       var M = monthly[rowYm];
-      if (kind === "income") {
+      if (kind === "hsa") {
+        // 独立成账：既不进收入也不进支出，更不碰流动现金
+        if (hsaKind(cat) === "in") M.hsaIn += amt; else M.hsaOut += amt;
+      } else if (kind === "income") {
         M.income += amt;
         if (cat.indexOf("Payroll") >= 0) M.payroll += amt;
         else if (cat.indexOf("Bonus") >= 0) M.bonus += amt;
@@ -1016,6 +1037,7 @@ function readAllInner(force) {
     monthlyOut[k] = { income: r2(monthly[k].income), expense: r2(monthly[k].expense),
                       net: r2(monthly[k].income - monthly[k].expense),   // 净收入：不含转账与回流
                       transfer: r2(monthly[k].transfer), redeem: r2(monthly[k].redeem),
+                      hsaIn: r2(monthly[k].hsaIn), hsaOut: r2(monthly[k].hsaOut),
                       endCash: (monthEnd[k] == null ? null : r2(monthEnd[k])) };
   });
   return { status: "success", stock: stock, expense: expense, ledger: ledger,
@@ -1032,7 +1054,7 @@ function writeMonthly(ss, monthly, monthCats, monthEnd, force) {
   var sh = ss.getSheetByName("Ledger_monthly") || ss.getSheetByName("Ledger-monthly");
   if (!sh) sh = ss.insertSheet("Ledger_monthly");
   var head = ["年月", "收入", "支出", "净收入", "投资转出", "本金回流", "月末流动现金",
-              "Payroll", "Bonus"].concat(CATS).concat(["未匹配"]);
+              "Payroll", "Bonus", "HSA 收入", "HSA 支出"].concat(CATS).concat(["未匹配"]);
   var rows = [head];
   Object.keys(monthly).sort().forEach(function (ym) {
     var m = monthly[ym];
@@ -1040,7 +1062,7 @@ function writeMonthly(ss, monthly, monthCats, monthEnd, force) {
     var r = [ym, r2(m.income), r2(m.expense), r2(m.income - m.expense),
              r2(m.transfer), r2(m.redeem),
              (monthEnd[ym] == null ? "" : r2(monthEnd[ym])),
-             r2(m.payroll), r2(m.bonus)];
+             r2(m.payroll), r2(m.bonus), r2(m.hsaIn), r2(m.hsaOut)];
     CATS.forEach(function (k) { r.push(r2(c[k] || 0)); });
     r.push(r2(c["未匹配"] || 0));
     rows.push(r);

@@ -205,3 +205,61 @@ console.log('\n— 首屏本地缓存 —');
      errs.some(m=>/sheet sync failed/.test(m)),
      '—— 修好后请把这条改成断言能拿到数据');
 }
+
+// ══════════════ 四、HSA 是第 5 种资金性质 ══════════════
+// HSA 的钱走独立账户，不从 Chase 出。记进 Ledger 但对流动现金贡献为 0，
+// 也不能混进「本月支出」——没刷 HSA 卡的同名分类必须留在原支出板块。
+console.log('\n— HSA 独立成账 —');
+{
+  const today=new Date(); const ym=`${today.getFullYear()}-${pad(today.getMonth()+1)}`;
+  const d=n=>`${ym}-${pad(n)}`;
+  const ledger=mkSheet('Ledger',[['Date','category','amount','note','key'],
+    [d(3),'Dining',200,'',''],
+    [d(5),'Health & Beauty',80,'没刷HSA卡',''],          // 留在支出板块
+    [d(6),'HSA · Income · 供款',250,'本人',''],
+    [d(6),'HSA · Income · 雇主补助',100,'雇主',''],
+    [d(12),'HSA · Health & Beauty',60,'牙医',''],        // 同名分类，但刷了 HSA 卡
+    [d(18),'HSA · 处方药',45.5,'','']]);
+  const tabs={Ledger:ledger,
+    Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+    Anchor:mkSheet('Anchor',[['date','amount','note'],[d(1),10000,'初始']]),
+    Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+    Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+    Ledger_monthly:mkSheet('Ledger_monthly',[])};
+  const {doGet}=backend(tabs);
+  const r=J(doGet({parameter:{}}));
+  const m=r.monthly[ym]||{};
+
+  ok('HSA 流水不减流动现金（锚点 10000 − 仅非 HSA 支出 280）', r.cash.balance===9720, '$'+r.cash.balance);
+  ok('本月支出不含 HSA', m.expense===280, '$'+m.expense);
+  ok('没刷卡的 Health & Beauty 仍在支出分类里', (r.expense['Health & Beauty']||0)===80,
+     '$'+(r.expense['Health & Beauty']||0));
+  ok('刷了卡的 HSA · Health & Beauty 不在支出分类里',
+     !Object.keys(r.expense).some(k=>k.indexOf('HSA')===0), Object.keys(r.expense).join(','));
+  ok('HSA 收入单独汇总', m.hsaIn===350, '$'+m.hsaIn);
+  ok('HSA 支出单独汇总', m.hsaOut===105.5, '$'+m.hsaOut);
+  ok('HSA 不进净收入', m.net===-280, '$'+m.net);
+  ok('HSA 不进投资转出/本金回流', m.transfer===0 && m.redeem===0);
+  ok('HSA 明细照常返回给前端', r.ledger.filter(x=>x.category.indexOf('HSA')===0).length===4);
+  ok('Ledger_monthly 新增 HSA 两列',
+     tabs.Ledger_monthly._rows[0].includes('HSA 收入') && tabs.Ledger_monthly._rows[0].includes('HSA 支出'));
+
+  // 前端同一套规则
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=()=>Promise.resolve({json:async()=>r});
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window; await wait();
+  ok('前端 catKind 与后端一致', w.eval("catKind('HSA · 处方药')")==='hsa');
+  ok('前端 catSign 对 HSA 返回 0', w.eval("catSign('HSA · 处方药')")===0);
+  ok('前端支出方块不含 HSA', w.eval("JSON.stringify(monthExpense)").indexOf('HSA')<0,
+     w.eval("JSON.stringify(monthExpense)"));
+  ok('HSA 收入合计', w.eval("hsaTotal('in')")===350, '$'+w.eval("hsaTotal('in')"));
+  ok('HSA 支出合计', w.eval("hsaTotal('out')")===105.5, '$'+w.eval("hsaTotal('out')"));
+  w.openDetail('hsa');
+  ok('HSA 页默认停在支出', w.eval("hsaTab")==='ex');
+  ok('HSA 页列出开销明细', /牙医|处方药/.test(w.document.getElementById('hsaTabBody').textContent));
+  w.switchHsaTab('in');
+  ok('切到收入页列出供款', /雇主|本人/.test(w.document.getElementById('hsaTabBody').textContent));
+}
