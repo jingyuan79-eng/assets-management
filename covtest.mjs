@@ -352,3 +352,89 @@ console.log('\n— HSA tab 上的合计 —');
   w.switchHsaTab('in');
   ok('切 tab 后合计仍在', tabs()[0]==='本月收入$350' && tabs()[1]==='本月医疗开销$106', tabs().join(' / '));
 }
+
+// ══════════════ 七、HSA 余额：锚点 + 流水 + 发薪日再分配 ══════════════
+// Cash 随 HSA 收支增减；收入入账那天先给 Investment 结息，再把 Cash
+// 超过 Floor 的部分扫进 Investment。全量重放，补记旧账也能自愈。
+console.log('\n— HSA 余额引擎 —');
+{
+  const HHEAD=['Name','Anchor Date','Anchor Amount','Rate','Floor','Balance(自动算)','Updated'];
+  function runH(ledgerRows, hsaRows){
+    const L=mkSheet('Ledger',[['Date','category','amount','note','key'],...ledgerRows]);
+    const H=mkSheet('HSA',[HHEAD,...hsaRows]);
+    const tabs={Ledger:L,HSA:H,
+      Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+      Anchor:mkSheet('Anchor',[['date','amount','note']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[])};
+    const {doGet}=backend(tabs);
+    return {r:J(doGet({parameter:{}})).hsa, H};
+  }
+  const DAILY=Math.pow(1.10,1/365)-1;
+  const near=(n,a,b,t)=>ok(n, Math.abs(a-b)<(t||0.05), `${a}`);
+
+  // 发薪日：入账 → 结息 → 扫到 Floor
+  let {r,H}=runH([['2026-08-15','HSA · Income · 供款',250,'',''],
+                  ['2026-08-15','HSA · Income · 雇主补助',100,'','']],
+                 [['Cash','2026-08-01',1900,'',2000,'',''],
+                  ['Investment','2026-08-01',10000,10,'','','']]);
+  near('Cash 被扫到 Floor', r.cash, 2000);
+  near('Investment = 结息 14 天 + 扫入 250', r.investment, 10000*Math.pow(1+DAILY,14)+250);
+  ok('记录了扫账日', r.lastSweep==='2026-08-15', r.lastSweep);
+  ok('余额回写进 Sheet 的 Balance 列', Number(H._rows[1][5])===r.cash);
+  ok('锚点列不被引擎改写', String(H._rows[1][1])==='2026-08-01' && Number(H._rows[1][2])===1900);
+
+  // 花超了：没到 Floor 就不转
+  r=runH([['2026-08-10','HSA · 医疗',800,'',''],
+          ['2026-08-15','HSA · Income · 供款',250,'',''],
+          ['2026-08-15','HSA · Income · 雇主补助',100,'','']],
+         [['Cash','2026-08-01',1900,'',2000,'',''],
+          ['Investment','2026-08-01',10000,10,'','','']]).r;
+  near('Cash = 1900 − 800 + 350', r.cash, 1450);
+  near('Investment 只结息不扫入', r.investment, 10000*Math.pow(1+DAILY,14));
+  ok('没到 Floor 就没有扫账日', r.lastSweep==='', r.lastSweep);
+
+  // 只有开销的日子不触发再分配
+  r=runH([['2026-08-20','HSA · 处方药',45.5,'','']],
+         [['Cash','2026-08-01',2500,'',2000,'',''],
+          ['Investment','2026-08-01',10000,10,'','','']]).r;
+  near('Cash 直接减，没被扫', r.cash, 2454.5);
+  near('Investment 一分没动', r.investment, 10000);
+
+  // 两个发薪日：第二次从上次结息日续滚
+  r=runH([['2026-08-01','HSA · Income · 供款',250,'',''],
+          ['2026-08-15','HSA · Income · 供款',250,'','']],
+         [['Cash','2026-08-01',2000,'',2000,'',''],
+          ['Investment','2026-08-01',10000,10,'','','']]).r;
+  near('两次扫入且中间正确结息', r.investment, 10250*Math.pow(1+DAILY,14)+250);
+
+  // 补记更早的开销 → 自愈
+  const base=[['2026-08-15','HSA · Income · 供款',250,'','']];
+  const seed=[['Cash','2026-08-01',1900,'',2000,'',''],
+              ['Investment','2026-08-01',10000,10,'','','']];
+  near('补记前 Cash 被扫到 Floor', runH(base,seed).r.cash, 2000);
+  const after=runH([['2026-08-05','HSA · 医疗',300,'',''],...base],seed).r;
+  near('补记 8/05 的 300 后自愈重算', after.cash, 1850);
+  ok('自愈后不再触发扫账', after.lastSweep==='');
+
+  // 前端显示
+  const info={cash:2000, investment:10286.62, rate:0.10, floor:2000,
+              anchorDate:'2026-08-01', invPost:'2026-08-15', updated:'2026-08-29', ready:true};
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=()=>Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+        monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},savings:[],bond:[],
+        notices:[],hsa:info,retire:[],serverDate:'2026-08-29'})});
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window; await wait();
+  ok('前端不再有写死的 HSA 种子', w.eval("DATA.hsa.groups[0].holdings.length")===2);
+  ok('Cash 用服务器算的值', w.eval("DATA.hsa.groups[0].holdings.find(x=>x.sym==='Cash').mv")===2000);
+  ok('Investment 用服务器算的值',
+     w.eval("DATA.hsa.groups[0].holdings.find(x=>x.sym==='Investment').mv")===10287);
+  ok('HSA 总额 = 两者之和', w.eval("classTotal.hsa")===12287, '$'+w.eval("classTotal.hsa"));
+  w.openDetail('hsa');
+  ok('页面标出转投下限', /超 \$2,000 自动转投/.test(w.document.getElementById('d-body').textContent));
+  ok('页面标出结息日', /结息至 2026\/08\/15/.test(w.document.getElementById('d-body').textContent));
+}

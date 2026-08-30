@@ -268,10 +268,8 @@ const DATA = {
   },
   hsa: {
     name:"HSA", color:"var(--hsa)", key:"hsa", meta:"医疗储蓄·双重免税",
-    groups:[ { cat:"HSA 账户", sub:"", holdings:[
-      {sym:"Investment", qty:"—", desc:"基金投资·长期免税", mv:3458},
-      {sym:"Cash",       qty:"—", desc:"可报销医疗支出", mv:2500},
-    ]}]
+    // 余额由 Sheet 的 HSA 表算（锚点 + HSA 流水 + 发薪日再分配），本地不留种子
+    groups:[ { cat:"HSA 账户", sub:"", holdings:[] }]
   },
 };
 
@@ -357,7 +355,7 @@ function loadSimple(cls, key){
 function persistSimple(cls, key){ localStorage.setItem(key, JSON.stringify(DATA[cls].groups[0].holdings)); }
 
 
-cleanLegacyKeys(); loadStock(); loadSimple('hsa','hsaList_v1');
+cleanLegacyKeys(); loadStock();
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -485,7 +483,7 @@ function saveSheetCache(data){
   try{
     localStorage.setItem(CACHE_KEY, JSON.stringify({
       ts: Date.now(),
-      savings: data.savings, bond: data.bond, cash: data.cash,
+      savings: data.savings, bond: data.bond, cash: data.cash, hsa: data.hsa,
       ledger: data.ledger, monthly: data.monthly,
       ledgerMonths: data.ledgerMonths, notices: data.notices
     }));
@@ -503,6 +501,7 @@ function loadSheetCache(){
   setCashFromServer(c.cash);
   rebuildSavings(c.savings);
   rebuildBonds(c.bond);
+  rebuildHsa(c.hsa);
   rebuildMonthExpense();
   return true;
 }
@@ -538,6 +537,7 @@ function syncStockFromSheet(){
       setCashFromServer(data.cash);
       rebuildSavings(data.savings);
       rebuildBonds(data.bond);
+      rebuildHsa(data.hsa);
       notices = data.notices || [];
       syncOk = true;
       cacheTs = 0;                // 拿到新数据，屏幕上不再是缓存
@@ -885,6 +885,23 @@ function todayD(){ const d=new Date(); d.setHours(0,0,0,0); return d; }
 function dateOf(s){ return new Date(s+'T00:00:00'); }
 function fmtD(d){ return d.toISOString().slice(0,10); }
 
+// ---- HSA ----
+// 余额全部由 Apps Script 算好送来：Cash 随 HSA 流水增减，发薪日先给
+// Investment 结息、再把 Cash 超过 Floor 的部分扫进去。小程序只负责显示。
+let hsaInfo=null;
+function rebuildHsa(info){
+  hsaInfo=info||null;
+  if(!info || !info.ready){ DATA.hsa.groups[0].holdings=[]; return; }
+  const ratePc=(info.rate>1?info.rate:info.rate*100);
+  DATA.hsa.groups[0].holdings=[
+    {sym:'Investment', qty:(ratePc?ratePc.toFixed(0)+'%':''), noprice:true,
+     mv:Math.round(info.investment||0),
+     desc:'基金投资·长期免税'+(info.invPost?(' · 结息至 '+info.invPost.replace(/-/g,'/')):'')},
+    {sym:'Cash', qty:'', noprice:true, mv:Math.round(info.cash||0),
+     desc:'可报销医疗支出 · 超 $'+fmt(info.floor||0)+' 自动转投'}
+  ];
+}
+
 // ---- 储蓄 ----
 function rebuildSavings(rows){
   DATA.cd.groups[0].holdings=(rows||[]).filter(function(r){
@@ -1223,7 +1240,7 @@ function openDetail(k, keepScroll){
         return '<div class="row" style="cursor:pointer" onclick="show401kForm()">'+inner+'</div>';
       }
       if(k==='hsa'){
-        return '<div class="row" style="cursor:pointer" onclick="editSimple(\''+k+'\','+hi+')">'+inner+'</div>';
+        return '<div class="row" style="cursor:pointer" onclick="editHsaRow(\''+hh.sym+'\')">'+inner+'</div>';
       }
       if(hh.noprice && hh.sym==='现金'){
         return '<div class="row" style="cursor:pointer" onclick="showDividendForm()">'+inner+'</div>'+
@@ -1468,6 +1485,7 @@ function refreshFromSheet(){
       if(data && data.status==='success'){
         rebuildSavings(data.savings);
         rebuildBonds(data.bond);
+        rebuildHsa(data.hsa);
         setCashFromServer(data.cash);
         ledgerRows = Array.isArray(data.ledger) ? data.ledger : ledgerRows;
         monthlyTotals = data.monthly || monthlyTotals;
@@ -1891,6 +1909,50 @@ function submitBuyStock(){
 // ==================== HSA 简单编辑 ====================
 const SIMPLE_KEY={hsa:'hsaList_v1'};
 let editingSimple={cls:null, idx:-1};
+// 点 HSA 的某一行：重设起算余额（对账），写回 Sheet 的锚点列。
+// 和储蓄「手动改余额」同理 —— 以你填的实际值为准，起算日定在今天，
+// 之后的流水再从这个新起点往上累。
+function editHsaRow(name){
+  const wrap=document.getElementById('simpleAddWrap');
+  if(!wrap) return;
+  if(wrap.innerHTML){ wrap.innerHTML=''; return; }
+  const it=DATA.hsa.groups[0].holdings.find(function(x){ return x.sym===name; });
+  const isInv=(name==='Investment');
+  const info=hsaInfo||{};
+  const ratePc=(info.rate>1?info.rate:(info.rate||0)*100);
+  wrap.innerHTML=
+    '<div class="editform" style="border-color:var(--hsa-ln)">'+
+      '<div style="font-size:12px;color:var(--ink-faint);margin-bottom:12px">'+
+        name+' · 对账后填入账户里的实际余额，起算日会定在今天</div>'+
+      '<div class="fld"><label>当前实际余额 ($)</label>'+
+        '<input id="hs-amt" type="number" inputmode="decimal" value="'+((it&&it.mv!=null)?it.mv:'')+'"></div>'+
+      (isInv
+        ? '<div class="fld"><label>预估年化收益率 (%)</label>'+
+          '<input id="hs-rate" type="number" inputmode="decimal" value="'+(ratePc||10)+'"></div>'
+        : '<div class="fld"><label>保留下限 ($) · 超出部分自动转投</label>'+
+          '<input id="hs-floor" type="number" inputmode="decimal" value="'+(info.floor!=null?info.floor:2000)+'"></div>')+
+      '<div class="btns">'+
+        '<button class="cancel" onclick="document.getElementById(\'simpleAddWrap\').innerHTML=\'\'">取消</button>'+
+        '<button class="save" style="background:var(--hsa)" onclick="saveHsaRow(\''+name+'\')">保存</button>'+
+      '</div></div>';
+  wrap.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function saveHsaRow(name){
+  const amt=parseFloat(document.getElementById('hs-amt').value);
+  if(!(amt>=0)){ alert('请填写有效余额'); return; }
+  const p={action:'updateHsa', name:name, amount:Math.round(amt*100)/100};
+  const rEl=document.getElementById('hs-rate'), fEl=document.getElementById('hs-floor');
+  if(rEl) p.rate=parseFloat(rEl.value)||0;
+  if(fEl) p.floor=parseFloat(fEl.value)||0;
+  document.getElementById('simpleAddWrap').innerHTML='';
+  apiWrite(p).then(function(res){
+    if(res && res.status==='success'){
+      if(res.hsa) rebuildHsa(res.hsa);
+      recompute(); openDetail('hsa', true);
+    }else{ writeFailed(res,'保存 HSA 余额'); }
+  });
+}
+
 function renderSimpleAdd(cls){
   const wrap=document.getElementById('simpleAddWrap');
   if(wrap) wrap.innerHTML='';

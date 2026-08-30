@@ -8,6 +8,24 @@
  *
  * ── 改动记录（每次改代码请在最上方补一条，旧条目保留）──────────────
  *
+ * v7  2026-08-29  HSA 第三步：余额搬进 Sheet，后端计算
+ *   · 新增 HSA 表（脚本会自建）：固定两行 Cash / Investment
+ *       A:Name B:Anchor Date C:Anchor Amount D:Rate E:Floor
+ *       F:Balance(自动算) G:Updated        —— F、G 是算出来的，勿手改
+ *   · 新增 runHsa：与流动现金同构的锚点模型，每次从锚点【全量重放】
+ *     全部 HSA 流水，不做增量推进 —— 补记一笔前几天的开销也能自愈
+ *       Cash        随 HSA 收入加、随 HSA 支出减
+ *       收入入账那天 = 再分配日：
+ *         ① 先按 Rate（年化，默认 10%）把 Investment 结算到这一天
+ *         ② Cash 超过 Floor（默认 2000）的部分转入 Investment 成为新本金
+ *         ③ Cash 没到 Floor 就不转（花得多的月份自动跳过）
+ *     账户间的搬动不写 Ledger —— 那是 HSA 内部的事，写进去会污染
+ *     「本月存入 / 本月开销」两个合计。余额回写 F 列做备份
+ *   · 新增 action updateHsa：对账用，把某一行的起算余额定在今天，
+ *     也可改 Rate / Floor
+ *   · readAllInner 的 hsa 字段改为返回算好的余额（原先是 readTab 的原始行，
+ *     前端从未使用）；dailyJob 也跑一次
+ *
  * v6  2026-08-29  HSA 第二步：Shortcut 分类归一
  *   · 新增 normCat：Shortcut 的分类菜单里只有一项「HSA」（那边没有收入），
  *     写进 Sheet 时补全为「HSA · 医疗」，catKind 才认得出、明细里也读得懂。
@@ -119,6 +137,7 @@ function handleActionInner(data) {
     case "adjustSaving": return adjustSaving(ss, data);
     case "deleteSaving": return deleteSaving(ss, data);
     case "dismissNotice":return dismissNotice(ss, data);
+    case "updateHsa":    return updateHsa(ss, data);
 
     case "updateStock": return updateStock(ss, data);
     case "addStock":    return addStock(ss, data);
@@ -833,6 +852,154 @@ function cleanBackfill() {
                         : ("没有发现 " + bs + " 之前的自动补录"));
 }
 
+// ==================== HSA ====================
+// 表结构 A:Name B:Anchor Date C:Anchor Amount D:Rate E:Floor F:Balance G:Updated
+// 固定两行：Cash / Investment。B、C、D、E 由你填，F、G 是算出来的，勿手改。
+//
+// 模型与流动现金同构：锚点 + 之后的全部 HSA 流水，每次从头重放。
+// 不用增量推进，是为了让「补记一笔前几天的开销」也能自愈。
+//
+//   Cash        随 HSA 收入（供款/雇主补助）加、随 HSA 支出减
+//   收入入账那天 = 再分配日：
+//     ① 先按年化 Rate 把 Investment 结算到这一天
+//     ② Cash 超过 Floor 的部分转入 Investment，成为新本金
+//     ③ Cash 没到 Floor 就不转（花得多的月份自动跳过）
+//
+// 账户之间的搬动不写 Ledger —— 那是 HSA 内部的事，写进去会污染
+// 「本月存入 / 本月开销」两个合计。余额本身回写到 F 列做备份。
+var HSA_COL = { NAME:1, ADATE:2, AAMT:3, RATE:4, FLOOR:5, BAL:6, UPD:7 };
+var HSA_HEAD = ["Name", "Anchor Date", "Anchor Amount", "Rate", "Floor",
+                "Balance(自动算)", "Updated"];
+
+function hsaSheet(ss) {
+  var sh = ss.getSheetByName("HSA");
+  if (!sh) {
+    sh = ss.insertSheet("HSA");
+    sh.getRange(1, 1, 3, HSA_HEAD.length).setValues([
+      HSA_HEAD,
+      ["Cash", "", 0, "", 2000, "", ""],
+      ["Investment", "", 0, 10, "", "", ""]
+    ]);
+    return sh;
+  }
+  var h = sh.getRange(1, 1, 1, HSA_HEAD.length).getValues()[0];
+  if (!h[HSA_COL.ADATE - 1]) sh.getRange(1, 1, 1, HSA_HEAD.length).setValues([HSA_HEAD]);
+  return sh;
+}
+
+function readHsaRows(sh) {
+  var last = sh.getLastRow();
+  if (last < 2) return {};
+  var v = sh.getRange(2, 1, last - 1, HSA_HEAD.length).getValues();
+  var out = {};
+  for (var i = 0; i < v.length; i++) {
+    var name = (v[i][HSA_COL.NAME - 1] || "").toString().trim();
+    if (!name) continue;
+    out[name.toLowerCase()] = {
+      row: i + 2,
+      raw: v[i].slice(0, HSA_HEAD.length),
+      name: name,
+      adate: s2d(v[i][HSA_COL.ADATE - 1]),
+      aamt: parseFloat(v[i][HSA_COL.AAMT - 1]) || 0,
+      rate: normRate(v[i][HSA_COL.RATE - 1]),
+      floor: parseFloat(v[i][HSA_COL.FLOOR - 1]) || 0
+    };
+  }
+  return out;
+}
+
+function writeHsaRow(sh, r, bal, upd) {
+  var out = r.raw.slice(0, HSA_HEAD.length);
+  out[HSA_COL.BAL - 1] = Math.round(bal * 100) / 100;
+  out[HSA_COL.UPD - 1] = upd;
+  sh.getRange(r.row, 1, 1, HSA_HEAD.length).setValues([out]);
+}
+
+// 把 Ledger 原始整表里的 HSA 流水挑出来，按日期升序返回
+function hsaFlows(lv, from) {
+  var out = [];
+  for (var i = 1; i < lv.length; i++) {
+    if (!lv[i][0]) continue;
+    var cat = (lv[i][1] || "").toString().trim();
+    if (catKind(cat) !== "hsa") continue;
+    var d = s2d(lv[i][0]); if (!d) continue;
+    var ds = d2s(d);
+    if (from && ds < from) continue;
+    out.push({ ds: ds, dir: hsaKind(cat), amt: parseFloat(lv[i][2]) || 0 });
+  }
+  out.sort(function (a, b) { return a.ds < b.ds ? -1 : a.ds > b.ds ? 1 : 0; });
+  return out;
+}
+
+function runHsa(ss, lv) {
+  var sh = hsaSheet(ss);
+  var rows = readHsaRows(sh);
+  var C = rows["cash"], I = rows["investment"];
+  if (!C || !I) return { cash: 0, investment: 0, ready: false,
+                         message: "HSA 表需要 Cash 和 Investment 两行" };
+  if (!lv) {
+    var lg = ss.getSheetByName("Ledger");
+    lv = lg ? lg.getDataRange().getValues() : [[]];
+  }
+  var start = C.adate || I.adate;
+  var startS = start ? d2s(start) : null;
+  var flows = hsaFlows(lv, startS);
+
+  var cash = C.aamt, inv = I.aamt;
+  var invPost = I.adate || C.adate || todaySv();
+  var floor = C.floor;
+  var lastSweep = "";
+
+  // 按天分组重放：先把当天的流水全部记上，再判断当天是不是再分配日
+  var i = 0;
+  while (i < flows.length) {
+    var day = flows[i].ds, hasIncome = false;
+    while (i < flows.length && flows[i].ds === day) {
+      if (flows[i].dir === "in") { cash += flows[i].amt; hasIncome = true; }
+      else { cash -= flows[i].amt; }
+      i++;
+    }
+    if (!hasIncome) continue;               // 只有开销的日子不做再分配
+    var dayD = s2d(day);
+    inv += accrue(inv, I.rate, dayDiff(invPost, dayD));   // ① 先结算投资收益
+    invPost = dayD;
+    if (cash > floor) {                                   // ② 超出部分转入投资
+      inv += (cash - floor);
+      cash = floor;
+      lastSweep = day;
+    }
+  }
+
+  var today = d2s(todaySv());
+  writeHsaRow(sh, C, cash, today);
+  writeHsaRow(sh, I, inv, today);
+  return {
+    cash: Math.round(cash * 100) / 100,
+    investment: Math.round(inv * 100) / 100,
+    rate: I.rate, floor: floor,
+    anchorDate: startS || "", lastSweep: lastSweep,
+    invPost: d2s(invPost), updated: today, ready: true
+  };
+}
+
+// 重设锚点：把某一行的起算余额定在今天（对账用）
+function updateHsa(ss, data) {
+  var sh = hsaSheet(ss);
+  var rows = readHsaRows(sh);
+  var key = (data.name || "").toString().trim().toLowerCase();
+  var r = rows[key];
+  if (!r) return { status: "error", message: "HSA 表里找不到 " + data.name };
+  var out = r.raw.slice(0, HSA_HEAD.length);
+  if (data.amount != null && data.amount !== "") {
+    out[HSA_COL.AAMT - 1] = parseFloat(data.amount) || 0;
+    out[HSA_COL.ADATE - 1] = d2s(todaySv());
+  }
+  if (data.rate != null && data.rate !== "")  out[HSA_COL.RATE - 1]  = normRate(data.rate);
+  if (data.floor != null && data.floor !== "") out[HSA_COL.FLOOR - 1] = parseFloat(data.floor) || 0;
+  sh.getRange(r.row, 1, 1, HSA_HEAD.length).setValues([out]);
+  return { status: "success", type: "updateHsa", hsa: safeRun(function () { return runHsa(ss); }, null) };
+}
+
 // ==================== 通知（自动发生的事）====================
 function noticeSheet(ss) {
   var sh = ss.getSheetByName("Notices");
@@ -874,6 +1041,7 @@ function dailyJob() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   runSavings(ss);
   runBonds(ss);
+  safeRun(function () { return runHsa(ss); }, null);
 }
 function installTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
@@ -1058,7 +1226,8 @@ function readAllInner(force) {
            savings: safeRun(function () { return runSavings(ss); }, []),
            notices: safeRun(function () { return readNotices(ss); }, []),
            bond: safeRun(function () { return runBonds(ss, bs); }, []),
-           hsa: readTab(ss, "HSA"), retire: readTab(ss, "Retire"),
+           hsa: safeRun(function () { return runHsa(ss, lv); }, null),
+           retire: readTab(ss, "Retire"),
            serverDate: Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd") };
 }
 
