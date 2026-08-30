@@ -263,3 +263,62 @@ console.log('\n— HSA 独立成账 —');
   w.switchHsaTab('in');
   ok('切到收入页列出供款', /雇主|本人/.test(w.document.getElementById('hsaTabBody').textContent));
 }
+
+// ══════════════ 五、HSA 供款与 Shortcut 分类归一 ══════════════
+console.log('\n— HSA 供款与分类归一 —');
+{
+  const ledger=mkSheet('Ledger',[['Date','category','amount','note','key']]);
+  const tabs={Ledger:ledger,
+    Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+    Anchor:mkSheet('Anchor',[['date','amount','note'],[fmt(daysAgo(30)),10000,'初始']]),
+    Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+    Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+    Ledger_monthly:mkSheet('Ledger_monthly',[])};
+  const {doGet}=backend(tabs);
+
+  // Shortcut 只发「HSA」，后端要补成带前缀的形式
+  let r=J(doGet({parameter:{action:'addLedger',date:fmt(daysAgo(1)),category:'HSA',amount:30}}));
+  ok('Shortcut 的「HSA」被补成 HSA · 医疗', r.category==='HSA · 医疗', r.category);
+  ok('补前缀后归到 hsa 而非支出', ledger._rows[1][1]==='HSA · 医疗', String(ledger._rows[1][1]));
+
+  // 普通分类不受影响
+  r=J(doGet({parameter:{action:'addLedger',date:fmt(daysAgo(1)),category:'Dining',amount:20}}));
+  ok('普通分类不被改写', r.category==='Dining', r.category);
+
+  // autoLedger（固定支出）走同一套归一
+  J(doGet({parameter:{action:'autoLedger',key:'fix:hsa1:x',date:fmt(daysAgo(1)),
+                      category:'HSA',amount:120,note:'每月理疗'}}));
+  ok('固定支出的 HSA 也补前缀',
+     ledger._rows.some(x=>String(x[4])==='fix:hsa1:x' && x[1]==='HSA · 医疗'));
+
+  const out=J(doGet({parameter:{}}));
+  ok('HSA 开销不减流动现金（锚点 10000 − 仅 Dining 20）', out.cash.balance===9980, '$'+out.cash.balance);
+
+  // 前端：供款配置驱动的自动入账
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.__calls=[];
+      w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+        if(a){ w.__calls.push(Object.fromEntries(url.searchParams));
+               return Promise.resolve({json:async()=>({status:'success',row:99})}); }
+        return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+          monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},savings:[],bond:[],
+          notices:[],hsa:[],retire:[],serverDate:'2026-08-29'})}); };
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window; await wait();
+  const d0=new Date(); d0.setHours(0,0,0,0); d0.setDate(d0.getDate()-14);
+  const startStr=`${d0.getFullYear()}-${pad(d0.getMonth()+1)}-${pad(d0.getDate())}`;
+  w.eval(`saveHsaCfg({employee:250,employer:100,freq:'biweekly',start:'${startStr}'})`);
+  await w.eval("runHsaContrib()");
+  const calls=w.__calls.filter(c=>c.action==='autoLedger');
+  ok('供款按发薪日入账（本人一笔、雇主一笔）',
+     calls.some(c=>c.key.indexOf('hsaee:')===0 && c.category==='HSA · Income · 供款' && +c.amount===250) &&
+     calls.some(c=>c.key.indexOf('hsaer:')===0 && c.category==='HSA · Income · 雇主补助' && +c.amount===100),
+     calls.map(c=>c.key).join(','));
+  ok('两周起始日 → 至少两个发薪日', new Set(calls.map(c=>c.key.split(':')[1])).size>=2);
+  const before=w.__calls.length;
+  await w.eval("runHsaContrib()");
+  ok('已入账的不再重发（key 去重）', w.__calls.length===before, `新增 ${w.__calls.length-before} 次`);
+  ok('未配置时不发请求', w.eval("(function(){saveHsaCfg({});return hsaPayDatesDue(loadHsaCfg()).length;})()")===0);
+}

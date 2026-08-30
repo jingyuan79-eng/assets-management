@@ -555,6 +555,7 @@ function syncStockFromSheet(){
       // 固定支出 / 工资 / 定期转账：后台补记，写完再刷一次（Sheet 端按 key 去重）
       return runFixedExpenses()
         .then(function(){ return runPayroll(); })
+        .then(function(){ return runHsaContrib(); })
         .then(function(){
           runRecurring();
           rebuildMonthExpense();
@@ -734,7 +735,8 @@ function renderFixedSection(cat){
     '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">固定支出</div>'+
     '<div class="num" style="font-size:12px;color:var(--ink-faint)">折合每月 $'+fmt(Math.round(monthly))+'</div></div>';
   if(list.length){
-    html+='<div class="group" style="background:'+EXP_COLORS[cat]+';border-color:rgba(0,0,0,.08)">'+
+    const bg=EXP_COLORS[cat]||'var(--hsa-bg)';
+    html+='<div class="group" style="background:'+bg+';border-color:rgba(0,0,0,.08)">'+
       list.map(function(x){
         const off=(x.enabled===false);
         return '<div class="row" style="cursor:pointer;border-color:rgba(0,0,0,.06);'+(off?'opacity:.45':'')+'" onclick="editFixed(\''+x.id+'\')">'+
@@ -743,7 +745,7 @@ function renderFixedSection(cat){
           '<div class="val"><div class="mv">$'+fmt(x.amount)+'</div></div></div>';
       }).join('')+'</div>';
   }
-  html+='<div class="addbox" style="border-color:rgba(0,0,0,.12);background:'+EXP_COLORS[cat]+'" onclick="showFixedForm(\''+cat.replace(/'/g,"\\'")+'\')">'+
+  html+='<div class="addbox" style="border-color:rgba(0,0,0,.12);background:'+(EXP_COLORS[cat]||'var(--hsa-bg)')+'" onclick="showFixedForm(\''+cat.replace(/'/g,"\\'")+'\')">'+
     '<div class="plus" style="color:var(--ink-2)">+</div>'+
     '<div class="lbl">添加固定支出 · 到期自动记账</div></div>'+
     '<div id="fixedFormWrap"></div>';
@@ -1897,9 +1899,131 @@ function renderSimpleAdd(cls){
 
 // ==================== HSA 收入 / 支出（简化版现金页）====================
 // HSA 的钱走独立账户，不碰流动现金，所以这里只看 category 以 HSA · 开头的流水。
-// 收入 = 供款 + 雇主补助（带 Income），支出 = 医疗开销。
+// 收入 = 本人供款 + 雇主补助（带 Income），支出 = 医疗开销。
+const HSA_CAT='HSA · 医疗';        // Shortcut 只发「HSA」，后端 normCat 会补成这个
 let hsaTab='ex';
 function switchHsaTab(t){ hsaTab=t; editingLedgerRow=null; renderHsa(); }
+
+// ---- 供款配置（存本地；和 Payroll 一样是设置，不是流水）----
+function loadHsaCfg(){
+  try{ return JSON.parse(localStorage.getItem('hsaConfig_v1')||'{}'); }catch(e){ return {}; }
+}
+function saveHsaCfg(c){
+  try{ localStorage.setItem('hsaConfig_v1', JSON.stringify(c)); }catch(e){}
+}
+// 与 payDatesDue 同一套规则：从起始日按频率推进，只列最近 60 天内到期的
+function hsaPayDatesDue(cfg){
+  const out=[];
+  if(!cfg||!cfg.start) return out;
+  if(!((cfg.employee>0)||(cfg.employer>0))) return out;
+  const today=todayD(), floor=bookFloor();
+  let d=dateOf(cfg.start), guard=0;
+  while(d<=today && guard++<400){
+    if(d>=floor) out.push(fmtD(d));
+    d=nextPayDate(d, cfg.freq||'biweekly');
+  }
+  return out;
+}
+// 每个发薪日给 HSA Cash 入两笔：本人供款、雇主补助。key 防重，与工资同构。
+function runHsaContrib(){
+  const cfg=loadHsaCfg();
+  const jobs=[];
+  hsaPayDatesDue(cfg).forEach(function(ds){
+    if(cfg.employee>0) jobs.push({ds:ds, key:'hsaee:'+ds, cat:'HSA · Income · 供款',
+                                  amt:Math.round(cfg.employee), note:'本人供款'});
+    if(cfg.employer>0) jobs.push({ds:ds, key:'hsaer:'+ds, cat:'HSA · Income · 雇主补助',
+                                  amt:Math.round(cfg.employer), note:'雇主补助'});
+  });
+  const todo=jobs.filter(function(j){ return !ledgerHasKey(j.key); });
+  if(!todo.length) return Promise.resolve();
+  let chain=Promise.resolve();
+  todo.forEach(function(j){
+    chain=chain.then(function(){
+      return apiWrite({action:'autoLedger', key:j.key, date:j.ds,
+                       category:j.cat, amount:j.amt, note:j.note})
+        .then(function(res){
+          ledgerRows.push({row:res&&res.row, date:j.ds, category:j.cat,
+                           amount:j.amt, note:j.note, key:j.key});
+        });
+    });
+  });
+  return chain.then(function(){ rebuildMonthExpense(); recompute(); });
+}
+
+// ---- 供款设置表单：employee / employer 两个 tab，频率和起始日共用 ----
+let hsaCfgTab='employee';
+function showHsaCfgForm(){
+  const w=document.getElementById('hsaCfgWrap');
+  if(!w) return;
+  if(w.innerHTML){ w.innerHTML=''; return; }
+  renderHsaCfgForm();
+  w.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function switchHsaCfgTab(t){
+  stashHsaCfgInput();          // 切 tab 前先把当前输入记下来，免得白填
+  hsaCfgTab=t; renderHsaCfgForm();
+}
+let hsaCfgDraft=null;
+function stashHsaCfgInput(){
+  const el=document.getElementById('hsa-amt');
+  if(!el || !hsaCfgDraft) return;
+  hsaCfgDraft[hsaCfgTab]=parseFloat(el.value)||0;
+  const f=document.getElementById('hsa-freq'), st=document.getElementById('hsa-start');
+  if(f) hsaCfgDraft.freq=f.value;
+  if(st) hsaCfgDraft.start=st.value;
+}
+function renderHsaCfgForm(){
+  const w=document.getElementById('hsaCfgWrap');
+  if(!w) return;
+  if(!hsaCfgDraft){
+    const c=loadHsaCfg();
+    hsaCfgDraft={employee:c.employee||0, employer:c.employer||0,
+                 freq:c.freq||'biweekly', start:c.start||''};
+  }
+  const isEE=(hsaCfgTab==='employee');
+  const freq=hsaCfgDraft.freq;
+  function fOpt(v,label){ return '<option value="'+v+'"'+(freq===v?' selected':'')+'>'+label+'</option>'; }
+  w.innerHTML=
+    '<div class="editform" style="border-color:var(--hsa-ln)">'+
+      '<div class="cashtabs" style="margin:0 0 12px">'+
+        '<div class="cashtab '+(isEE?'on-ex':'')+'" onclick="switchHsaCfgTab(\'employee\')">Employee</div>'+
+        '<div class="cashtab '+(!isEE?'on-ex':'')+'" onclick="switchHsaCfgTab(\'employer\')">Employer</div>'+
+      '</div>'+
+      '<div class="fld"><label>'+(isEE?'本人每期供款':'雇主每期补助')+' ($)</label>'+
+        '<input id="hsa-amt" type="number" inputmode="decimal" value="'+
+          (hsaCfgDraft[hsaCfgTab]||'')+'" placeholder="例：'+(isEE?'250':'100')+'"></div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin:-4px 0 12px">'+
+        '另一项：'+(isEE?'雇主 $'+fmt(hsaCfgDraft.employer||0):'本人 $'+fmt(hsaCfgDraft.employee||0))+
+        '（切到另一个 tab 设置，两项一起保存）</div>'+
+      '<div class="fld"><label>发薪频率</label>'+
+        '<select id="hsa-freq">'+fOpt('weekly','每周')+fOpt('biweekly','每两周')+fOpt('monthly','每月')+'</select></div>'+
+      '<div class="fld"><label>起始发薪日</label>'+
+        '<input id="hsa-start" type="date" value="'+(hsaCfgDraft.start||'')+'"></div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:10px">'+
+        '保存后会从起始日按频率补记到 HSA Cash。若余额已包含这些供款，请把起始日设为最近一次发薪日之后。</div>'+
+      '<div class="btns">'+
+        '<button class="cancel" onclick="cancelHsaCfg()">取消</button>'+
+        '<button class="save" style="background:var(--hsa)" onclick="saveHsaCfgForm()">保存</button>'+
+      '</div></div>';
+  const el=document.getElementById('hsa-amt'); if(el) el.focus();
+}
+function cancelHsaCfg(){
+  hsaCfgDraft=null;
+  const w=document.getElementById('hsaCfgWrap'); if(w) w.innerHTML='';
+}
+function saveHsaCfgForm(){
+  stashHsaCfgInput();
+  const c=hsaCfgDraft||{};
+  if(!((c.employee>0)||(c.employer>0))){ alert('请至少填写本人或雇主其中一项金额'); return; }
+  if(!c.start){ alert('请填写起始发薪日'); return; }
+  saveHsaCfg({employee:Math.round(c.employee||0), employer:Math.round(c.employer||0),
+              freq:c.freq||'biweekly', start:c.start});
+  hsaCfgDraft=null;
+  const w=document.getElementById('hsaCfgWrap'); if(w) w.innerHTML='';
+  runHsaContrib().then(function(){ openDetail('hsa', true); });
+}
+
+// ---- 明细 ----
 function hsaRows(dir){
   const ym=curYm();
   return ledgerRows.filter(function(r){
@@ -1922,38 +2046,73 @@ function renderHsa(){
     '<div id="hsaTabBody"></div>';
   renderHsaTabBody();
 }
+function hsaDetailRows(dir){
+  const rows=hsaRows(dir), isIn=(dir==='in');
+  if(!rows.length){
+    return '<div class="placeholder">'+(isIn?'本月还没有 HSA 存入记录':'本月还没有 HSA 开销记录')+'</div>';
+  }
+  return '<div class="group">'+rows.map(function(r){
+    const label=(r.category||'').replace(/^HSA · (Income · )?/,'');
+    const isFix=!!(r.key||'');
+    return '<div class="row" style="cursor:pointer" onclick="editLedger('+r.row+')">'+
+      '<div class="tk" style="width:auto;flex:1">'+
+        '<div class="sym" style="font-size:13px">'+(r.note||label)+(isFix&&!isIn?' · 固定':'')+'</div>'+
+        '<div class="qty">'+(r.date||'').replace(/-/g,'/')+' · '+label+'</div></div>'+
+      '<div class="val"><div class="mv" style="color:'+(isIn?'var(--pos)':'var(--ink)')+'">'+
+        (isIn?'+':'−')+'$'+(parseFloat(r.amount)||0).toFixed(2)+'</div></div></div>'+
+      '<div class="stock-slot" id="lg-'+r.row+'"></div>';
+  }).join('')+'</div>';
+}
 function renderHsaTabBody(){
   const body=document.getElementById('hsaTabBody');
   if(!body) return;
-  const dir=(hsaTab==='in')?'in':'out';
-  const rows=hsaRows(dir), total=hsaTotal(dir);
-  const isIn=(dir==='in');
-  let h='<div style="border-radius:14px;padding:11px 12px;background:'+
-        (isIn?'var(--cash-bg)':'var(--hsa-bg)')+';text-align:center">'+
-    '<div style="font-size:11px;color:'+(isIn?'var(--cash)':'var(--hsa)')+';font-weight:600">'+
-      (isIn?'本月存入':'本月医疗开销')+'</div>'+
-    '<div class="num" style="font-size:16px;font-weight:650;color:var(--ink);margin-top:2px">$'+
-      fmt(total)+'</div></div>';
-  h+='<div style="display:flex;align-items:baseline;margin:18px 2px 8px">'+
-    '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">'+
-      (isIn?'本月存入明细':'本月开销明细')+'</div>'+
-    '<div class="num" style="font-size:12px;color:var(--ink-faint)">'+rows.length+' 笔</div></div>';
-  if(!rows.length){
-    h+='<div class="placeholder">'+(isIn?'本月还没有 HSA 存入记录':'本月还没有 HSA 开销记录')+'</div>';
+  let h='';
+  if(hsaTab==='in'){
+    const cfg=loadHsaCfg();
+    const freqLabel={weekly:'每周',biweekly:'每两周',monthly:'每月'};
+    const set=((cfg.employee>0)||(cfg.employer>0));
+    const line=set
+      ? ('已设：'+(freqLabel[cfg.freq]||'每两周')+' · 本人 $'+fmt(cfg.employee||0)+' + 雇主 $'+fmt(cfg.employer||0))
+      : '未设置';
+    h+='<div class="group" style="background:var(--hsa-bg);border:none">'+
+        '<div class="row" style="border-color:rgba(0,0,0,.05);cursor:pointer" onclick="showHsaCfgForm()">'+
+          '<div class="tk" style="width:auto;flex:1"><div class="sym" style="color:#8a4a22">Contribution</div>'+
+            '<div class="qty" style="color:#8a4a22">'+line+'</div></div>'+
+          '<div class="val"><div class="pc" style="color:#8a4a22">设置</div></div></div>'+
+      '</div>'+
+      '<div id="hsaCfgWrap"></div>'+
+      '<div style="margin-top:12px;border-radius:14px;padding:11px 12px;background:var(--cash-bg);text-align:center">'+
+        '<div style="font-size:11px;color:var(--cash);font-weight:600">本月存入</div>'+
+        '<div class="num" style="font-size:16px;font-weight:650;color:var(--ink);margin-top:2px">$'+
+          fmt(hsaTotal('in'))+'</div></div>'+
+      '<div style="display:flex;align-items:baseline;margin:18px 2px 8px">'+
+        '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">本月存入明细</div>'+
+        '<div class="num" style="font-size:12px;color:var(--ink-faint)">'+hsaRows('in').length+' 笔</div></div>'+
+      hsaDetailRows('in');
   }else{
-    h+='<div class="group">'+rows.map(function(r){
-      // 「HSA · Income · 供款」→「供款」；「HSA · Health & Beauty」→「Health & Beauty」
-      const label=(r.category||'').replace(/^HSA · (Income · )?/,'');
-      return '<div class="row" style="cursor:pointer" onclick="editLedger('+r.row+')">'+
-        '<div class="tk" style="width:auto;flex:1">'+
-          '<div class="sym" style="font-size:13px">'+(r.note||label)+'</div>'+
-          '<div class="qty">'+(r.date||'').replace(/-/g,'/')+' · '+label+'</div></div>'+
-        '<div class="val"><div class="mv" style="color:'+(isIn?'var(--pos)':'var(--neg)')+'">'+
-          (isIn?'+':'−')+'$'+(parseFloat(r.amount)||0).toFixed(2)+'</div></div></div>'+
-        '<div class="stock-slot" id="lg-'+r.row+'"></div>';
-    }).join('')+'</div>';
+    h+='<div style="border-radius:14px;padding:11px 12px;background:var(--hsa-bg);text-align:center">'+
+        '<div style="font-size:11px;color:var(--hsa);font-weight:600">本月医疗开销</div>'+
+        '<div class="num" style="font-size:16px;font-weight:650;color:var(--ink);margin-top:2px">$'+
+          fmt(hsaTotal('out'))+'</div></div>'+
+      '<div style="display:flex;align-items:baseline;margin:18px 2px 8px">'+
+        '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">本月开销明细</div>'+
+        '<div class="num" style="font-size:12px;color:var(--ink-faint)">'+hsaRows('out').length+' 笔</div></div>'+
+      hsaDetailRows('out')+
+      '<button style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:14px;'+
+        'background:var(--card);color:var(--ink-2);font-size:14px;font-weight:600;'+
+        'font-family:inherit;cursor:pointer" onclick="showAddHsaLedger()">+ 补记一笔</button>'+
+      '<div id="addLedgerWrap"></div>'+
+      renderFixedSection(HSA_CAT);
   }
   body.innerHTML=h;
+}
+// 补记一笔 HSA 开销：复用现金页的表单，但分类锁定为 HSA
+function showAddHsaLedger(){
+  const w=document.getElementById('addLedgerWrap');
+  if(!w) return;
+  if(w.innerHTML){ w.innerHTML=''; return; }
+  w.innerHTML=ledgerFormHtml({category:HSA_CAT}, false);
+  w.scrollIntoView({behavior:'smooth',block:'center'});
 }
 function simpleFormHtml(cls,vals,isEdit){
   vals=vals||{};
@@ -2401,7 +2560,8 @@ function ledgerFormHtml(v, isEdit){
   const cat=v.category||(expenseDrill&&expenseDrill!=='__ALL__'?expenseDrill:EXP_CATS[0]);
   const kind=catKind(cat);
   const INCOME_CATS=['Income · Payroll','Income · Bonus','Income · 国债利息','Income · 调整'];
-  const pool=(kind==='income')?INCOME_CATS:EXP_CATS;
+  const HSA_CATS=['HSA · 医疗','HSA · Health & Beauty','HSA · 处方药','HSA · 其他'];
+  const pool=(kind==='income')?INCOME_CATS:(kind==='hsa'?HSA_CATS:EXP_CATS);
   let opts=pool.map(function(c){ return '<option value="'+c+'"'+(cat===c?' selected':'')+'>'+c+'</option>'; }).join('');
   if(pool.indexOf(cat)<0){ opts='<option value="'+cat+'" selected>'+cat+(kind==='expense'&&!matchCat(cat)?'（不匹配，请改正）':'')+'</option>'+opts; }
   return '<div class="editform" style="border-color:var(--cash-ln)">'+

@@ -8,6 +8,11 @@
  *
  * ── 改动记录（每次改代码请在最上方补一条，旧条目保留）──────────────
  *
+ * v6  2026-08-29  HSA 第二步：Shortcut 分类归一
+ *   · 新增 normCat：Shortcut 的分类菜单里只有一项「HSA」（那边没有收入），
+ *     写进 Sheet 时补全为「HSA · 医疗」，catKind 才认得出、明细里也读得懂。
+ *     addLedger / autoLedger / updateLedger 三处入口都过这一层
+ *
  * v5  2026-08-29  HSA 第一步：独立成账
  *   · catKind 新增第 5 种资金性质 hsa（前缀 "HSA ·"），catSign 返回 0 ——
  *     HSA 的钱走独立账户，不从 Chase 出，记进 Ledger 但不影响流动现金
@@ -136,12 +141,20 @@ function ledgerSheet(ss) {
   return lg;
 }
 
+// Shortcut 的分类菜单里只有一项「HSA」（它那边没有收入）。写进 Sheet 时补全前缀，
+// 使其符合「HSA · xxx」约定 —— catKind 才认得出，明细里也读得懂。
+function normCat(cat) {
+  var c = (cat || "").toString().trim();
+  if (c === "HSA") return "HSA · 医疗";
+  return c;
+}
+
 function addLedger(ss, data, useToday) {
   var lg = ledgerSheet(ss);
   var date = useToday
     ? Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd")
     : (data.date || Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd"));
-  var category = (data.category || "UNCATEGORIZED").toString().trim();
+  var category = normCat(data.category || "UNCATEGORIZED");
   var amount = parseFloat(data.amount) || 0;
   var note = (data.note || "").toString();
   lg.appendRow([date, category, amount, note, ""]);
@@ -165,7 +178,7 @@ function autoLedger(ss, data) {
   }
   SpreadsheetApp.flush();                     // 确保读到的是最新状态
   var date = data.date || Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd");
-  lg.appendRow([date, (data.category || "Bill & utilities").toString().trim(),
+  lg.appendRow([date, normCat(data.category || "Bill & utilities"),
                 parseFloat(data.amount) || 0, (data.note || "").toString(), key]);
   SpreadsheetApp.flush();
   return { status: "success", type: "autoLedger", key: key, row: lg.getLastRow() };
@@ -187,7 +200,7 @@ function updateLedger(ss, data) {
   var old = lg.getRange(row, 1, 1, 4).getValues()[0];
   var next = [
     data.date != null && data.date !== "" ? data.date : old[0],
-    data.category ? data.category.toString().trim() : old[1],
+    data.category ? normCat(data.category) : old[1],
     data.amount != null ? (parseFloat(data.amount) || 0) : old[2],
     data.note != null ? data.note.toString() : old[3]
   ];
