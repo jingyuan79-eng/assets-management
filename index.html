@@ -2037,11 +2037,19 @@ function hsaTotal(dir){
 function renderHsa(){
   const wrap=document.getElementById('hsaWrap');
   if(!wrap) return;
+  // 合计直接写在 tab 上，下面不再单独放汇总框
+  // 注意 tab 的方向标识是 in/ex，而流水的方向是 in/out（hsaKind 的返回值），
+  // 取合计时必须换算，否则支出 tab 永远显示 $0。
+  function tab(dir,label){
+    const on=(hsaTab===dir)?(dir==='in'?' on-in':' on-ex'):'';
+    return '<div class="cashtab'+on+'" style="padding:9px 6px;line-height:1.25" '+
+      'onclick="switchHsaTab(\''+dir+'\')">'+
+      '<div style="font-size:12px;font-weight:600">'+label+'</div>'+
+      '<div class="num" style="font-size:15px;font-weight:650;margin-top:1px">$'+
+        fmt(hsaTotal(dir==='in'?'in':'out'))+'</div></div>';
+  }
   wrap.innerHTML=
-    '<div class="cashtabs">'+
-      '<div class="cashtab '+(hsaTab==='in'?'on-in':'')+'" onclick="switchHsaTab(\'in\')">收入</div>'+
-      '<div class="cashtab '+(hsaTab==='ex'?'on-ex':'')+'" onclick="switchHsaTab(\'ex\')">支出</div>'+
-    '</div>'+
+    '<div class="cashtabs">'+tab('in','本月收入')+tab('ex','本月医疗开销')+'</div>'+
     '<div style="margin:2px 2px 10px;font-size:12px;color:var(--ink-faint);font-weight:600">'+monthLabel()+'</div>'+
     '<div id="hsaTabBody"></div>';
   renderHsaTabBody();
@@ -2081,20 +2089,12 @@ function renderHsaTabBody(){
           '<div class="val"><div class="pc" style="color:#8a4a22">设置</div></div></div>'+
       '</div>'+
       '<div id="hsaCfgWrap"></div>'+
-      '<div style="margin-top:12px;border-radius:14px;padding:11px 12px;background:var(--cash-bg);text-align:center">'+
-        '<div style="font-size:11px;color:var(--cash);font-weight:600">本月存入</div>'+
-        '<div class="num" style="font-size:16px;font-weight:650;color:var(--ink);margin-top:2px">$'+
-          fmt(hsaTotal('in'))+'</div></div>'+
       '<div style="display:flex;align-items:baseline;margin:18px 2px 8px">'+
         '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">本月存入明细</div>'+
         '<div class="num" style="font-size:12px;color:var(--ink-faint)">'+hsaRows('in').length+' 笔</div></div>'+
       hsaDetailRows('in');
   }else{
-    h+='<div style="border-radius:14px;padding:11px 12px;background:var(--hsa-bg);text-align:center">'+
-        '<div style="font-size:11px;color:var(--hsa);font-weight:600">本月医疗开销</div>'+
-        '<div class="num" style="font-size:16px;font-weight:650;color:var(--ink);margin-top:2px">$'+
-          fmt(hsaTotal('out'))+'</div></div>'+
-      '<div style="display:flex;align-items:baseline;margin:18px 2px 8px">'+
+    h+='<div style="display:flex;align-items:baseline;margin:4px 2px 8px">'+
         '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">本月开销明细</div>'+
         '<div class="num" style="font-size:12px;color:var(--ink-faint)">'+hsaRows('out').length+' 笔</div></div>'+
       hsaDetailRows('out')+
@@ -2605,7 +2605,7 @@ function readLedgerForm(){
 // ledgerRows，但各自只渲染属于自己的行，所以两边都要给机会重绘。
 function refreshLedgerViews(){
   if(document.getElementById('cashTabBody')) renderCashTabBody();
-  if(document.getElementById('hsaTabBody'))  renderHsaTabBody();
+  if(document.getElementById('hsaWrap'))     renderHsa();   // tab 上带着合计，要整块重绘
 }
 // 乐观更新：本地先改 → 立刻刷新界面 → 后台写 Sheet；失败自动撤回
 function applyLocal(fn){

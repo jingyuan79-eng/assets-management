@@ -322,3 +322,33 @@ console.log('\n— HSA 供款与分类归一 —');
   ok('已入账的不再重发（key 去重）', w.__calls.length===before, `新增 ${w.__calls.length-before} 次`);
   ok('未配置时不发请求', w.eval("(function(){saveHsaCfg({});return hsaPayDatesDue(loadHsaCfg()).length;})()")===0);
 }
+
+// ══════════════ 六、HSA 合计直接显示在 tab 上 ══════════════
+// tab 的方向标识是 in/ex，流水方向是 in/out，取合计时必须换算 ——
+// 弄混的话支出 tab 会永远显示 $0（曾经就是这么错的）。
+console.log('\n— HSA tab 上的合计 —');
+{
+  const today=new Date(); const ym=`${today.getFullYear()}-${pad(today.getMonth()+1)}`;
+  const d=n=>`${ym}-${pad(n)}`;
+  const LED=[
+    {row:2,date:d(7),category:'HSA · Income · 供款',amount:250,note:'本人',key:'hsaee:'+d(7)},
+    {row:3,date:d(7),category:'HSA · Income · 雇主补助',amount:100,note:'雇主',key:'hsaer:'+d(7)},
+    {row:4,date:d(12),category:'HSA · 医疗',amount:60,note:'牙医',key:''},
+    {row:5,date:d(18),category:'HSA · 处方药',amount:45.5,note:'',key:''}];
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=()=>Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},
+        ledger:LED,monthly:{},ledgerMonths:[ym],cash:{balance:0,hasAnchor:false},
+        savings:[],bond:[],notices:[],hsa:[],retire:[],serverDate:'2026-08-29'})});
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window; await wait();
+  w.openDetail('hsa');
+  const tabs=()=>[].map.call(w.document.querySelectorAll('#hsaWrap .cashtab'),t=>t.textContent);
+  ok('收入 tab 带出本月合计', tabs()[0]==='本月收入$350', tabs()[0]);   // 250 本人 + 100 雇主
+  ok('支出 tab 带出本月合计（不是 $0）', tabs()[1]==='本月医疗开销$106', tabs()[1]);
+  ok('页面里不再有单独的汇总框',
+     !/本月存入\$/.test(w.document.getElementById('hsaTabBody').textContent));
+  w.switchHsaTab('in');
+  ok('切 tab 后合计仍在', tabs()[0]==='本月收入$350' && tabs()[1]==='本月医疗开销$106', tabs().join(' / '));
+}
