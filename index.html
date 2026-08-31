@@ -236,7 +236,7 @@ let ASOF = fmtD(todayD());
 // ==================== 数据骨架 ====================
 const DATA = {
   stock: {
-    name:"股票", color:"var(--stock)", key:"stock", meta:"Webull · 含现金/BTC/RSU",
+    name:"股票", color:"var(--stock)", key:"stock", meta:"Webull · 含RSU",
     groups:[]   // 由 localStorage / Google Sheet 填充
   },
   cd: {
@@ -246,13 +246,13 @@ const DATA = {
     groups:[ { cat:"定期存单", sub:"", holdings:[] }]
   },
   bond: {
-    name:"国债", color:"var(--bond)", key:"bond", meta:"TreasuryDirect · 均 3.98%",
+    name:"国债", color:"var(--bond)", key:"bond", meta:"TreasuryDirect",
     // 数据全部来自 Sheet 的 Bond 表，本地不留种子（同 cd）：
     // 首次安装宁可显示 $0，也不要闪一下写死的旧数字
     groups:[ { cat:"美国国债", sub:"", holdings:[] }]
   },
   cash: {
-    name:"现金", color:"var(--cash)", key:"cash", meta:"",
+    name:"现金", color:"var(--cash)", key:"cash", meta:"Chase",
     groups:[ { cat:"操作账户", sub:"", holdings:[
       {sym:"Chase", qty:"~0%", desc:"日常操作账户", mv:0},   // 由 Sheet 的 cash.balance 覆盖
     ]}],
@@ -267,7 +267,7 @@ const DATA = {
     ]}]
   },
   hsa: {
-    name:"HSA", color:"var(--hsa)", key:"hsa", meta:"医疗储蓄·双重免税",
+    name:"HSA", color:"var(--hsa)", key:"hsa", meta:"医疗储蓄",
     // 余额由 Sheet 的 HSA 表算（锚点 + HSA 流水 + 发薪日再分配），本地不留种子
     groups:[ { cat:"HSA 账户", sub:"", holdings:[] }]
   },
@@ -292,15 +292,15 @@ const STOCK_TAXONOMY = [
   {sheet:'Consumer',          cat:'消费',            sub:''},
   {sheet:'医疗',              cat:'医疗 ETF',        sub:'防御·低AI相关'},
   {sheet:'International ETF', cat:'国际股票 ETF',    sub:'非美分散'},
-  {sheet:'Value ETF',         cat:'价值 / 小盘价值', sub:'平衡成长倾斜'},
-  {sheet:'Other ETF',         cat:'主题 ETF',        sub:'国防/能源/太空'},
+  {sheet:'Value ETF',         cat:'美股小盘 ETF',    sub:'小盘价值'},
+  {sheet:'Other ETF',         cat:'其他主题 ETF',    sub:'国防/能源'},
   {sheet:'Gold.coin',         cat:'黄金 · 加密 · 现金', sub:'保险与待投资子弹'}
 ];
 const CAT_MAP = {}; STOCK_TAXONOMY.forEach(function(t){ CAT_MAP[t.sheet]=t.cat; });
 const GROUP_META = STOCK_TAXONOMY.map(function(t){ return {cat:t.cat, sub:t.sub, semi:t.semi||false}; });
 const STOCK_CATS = GROUP_META.map(function(g){ return g.cat; });
 const GOLD_CAT = '黄金 · 加密 · 现金';
-const THEME_CAT = '主题 ETF';
+const THEME_CAT = '其他主题 ETF';
 
 // ASMI 在 Sheet / GOOGLEFINANCE 中统一写作 ASMIY
 function normSym(s){
@@ -884,6 +884,8 @@ function dateOf(s){ return new Date(s+'T00:00:00'); }
 function fmtD(d){ return d.toISOString().slice(0,10); }
 
 // ---- HSA ----
+// 自动补仓频率：多久做一次「结算投资收益 + 把 Cash 超出下限的部分扫进投资」
+const SWEEP_LABEL={biweekly:'每两周', monthly:'每月', quarterly:'每季度'};
 // 余额全部由 Apps Script 算好送来：Cash 随 HSA 流水增减，发薪日先给
 // Investment 结息、再把 Cash 超过 Floor 的部分扫进去。小程序只负责显示。
 let hsaInfo=null;
@@ -894,9 +896,9 @@ function rebuildHsa(info){
   DATA.hsa.groups[0].holdings=[
     {sym:'Investment', qty:(ratePc?ratePc.toFixed(0)+'%':''), noprice:true,
      mv:Math.round(info.investment||0),
-     desc:'基金投资·长期免税'+(info.invPost?(' · 结息至 '+info.invPost.replace(/-/g,'/')):'')},
+     desc:'基金定投'},
     {sym:'Cash', qty:'', noprice:true, mv:Math.round(info.cash||0),
-     desc:'可报销医疗支出 · 超 $'+fmt(info.floor||0)+' 自动转投'}
+     desc:'自动补仓 · '+(SWEEP_LABEL[info.sweep]||'每两周')}
   ];
 }
 
@@ -1928,7 +1930,12 @@ function editHsaRow(name){
         ? '<div class="fld"><label>预估年化收益率 (%)</label>'+
           '<input id="hs-rate" type="number" inputmode="decimal" value="'+(ratePc||10)+'"></div>'
         : '<div class="fld"><label>保留下限 ($) · 超出部分自动转投</label>'+
-          '<input id="hs-floor" type="number" inputmode="decimal" value="'+(info.floor!=null?info.floor:2000)+'"></div>')+
+          '<input id="hs-floor" type="number" inputmode="decimal" value="'+(info.floor!=null?info.floor:2000)+'"></div>'+
+          '<div class="fld"><label>自动补仓</label><select id="hs-sweep">'+
+            Object.keys(SWEEP_LABEL).map(function(k){
+              return '<option value="'+k+'"'+((info.sweep||'biweekly')===k?' selected':'')+'>'+
+                     SWEEP_LABEL[k]+'</option>'; }).join('')+
+          '</select></div>')+
       '<div class="btns">'+
         '<button class="cancel" onclick="document.getElementById(\'simpleAddWrap\').innerHTML=\'\'">取消</button>'+
         '<button class="save" style="background:var(--hsa)" onclick="saveHsaRow(\''+name+'\')">保存</button>'+
@@ -1942,6 +1949,8 @@ function saveHsaRow(name){
   const rEl=document.getElementById('hs-rate'), fEl=document.getElementById('hs-floor');
   if(rEl) p.rate=parseFloat(rEl.value)||0;
   if(fEl) p.floor=parseFloat(fEl.value)||0;
+  const sEl=document.getElementById('hs-sweep');
+  if(sEl) p.sweep=sEl.value;
   document.getElementById('simpleAddWrap').innerHTML='';
   apiWrite(p).then(function(res){
     if(res && res.status==='success'){

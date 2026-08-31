@@ -358,7 +358,7 @@ console.log('\n— HSA tab 上的合计 —');
 // 超过 Floor 的部分扫进 Investment。全量重放，补记旧账也能自愈。
 console.log('\n— HSA 余额引擎 —');
 {
-  const HHEAD=['Name','Anchor Date','Anchor Amount','Rate','Floor','Balance(自动算)','Updated'];
+  const HHEAD=['Name','Anchor Date','Anchor Amount','Rate','Floor','Sweep','Balance(自动算)','Updated'];
   function runH(ledgerRows, hsaRows){
     const L=mkSheet('Ledger',[['Date','category','amount','note','key'],...ledgerRows]);
     const H=mkSheet('HSA',[HHEAD,...hsaRows]);
@@ -377,42 +377,42 @@ console.log('\n— HSA 余额引擎 —');
   // 发薪日：入账 → 结息 → 扫到 Floor
   let {r,H}=runH([['2026-08-15','HSA · Income · 供款',250,'',''],
                   ['2026-08-15','HSA · Income · 雇主补助',100,'','']],
-                 [['Cash','2026-08-01',1900,'',2000,'',''],
-                  ['Investment','2026-08-01',10000,10,'','','']]);
+                 [['Cash','2026-08-01',1900,'',2000,'biweekly','',''],
+                  ['Investment','2026-08-01',10000,10,'','','','']]);
   near('Cash 被扫到 Floor', r.cash, 2000);
   near('Investment = 结息 14 天 + 扫入 250', r.investment, 10000*Math.pow(1+DAILY,14)+250);
   ok('记录了扫账日', r.lastSweep==='2026-08-15', r.lastSweep);
-  ok('余额回写进 Sheet 的 Balance 列', Number(H._rows[1][5])===r.cash);
+  ok('余额回写进 Sheet 的 Balance 列', Number(H._rows[1][6])===r.cash);
   ok('锚点列不被引擎改写', String(H._rows[1][1])==='2026-08-01' && Number(H._rows[1][2])===1900);
 
   // 花超了：没到 Floor 就不转
   r=runH([['2026-08-10','HSA · 医疗',800,'',''],
           ['2026-08-15','HSA · Income · 供款',250,'',''],
           ['2026-08-15','HSA · Income · 雇主补助',100,'','']],
-         [['Cash','2026-08-01',1900,'',2000,'',''],
-          ['Investment','2026-08-01',10000,10,'','','']]).r;
+         [['Cash','2026-08-01',1900,'',2000,'biweekly','',''],
+          ['Investment','2026-08-01',10000,10,'','','','']]).r;
   near('Cash = 1900 − 800 + 350', r.cash, 1450);
   near('Investment 只结息不扫入', r.investment, 10000*Math.pow(1+DAILY,14));
   ok('没到 Floor 就没有扫账日', r.lastSweep==='', r.lastSweep);
 
   // 只有开销的日子不触发再分配
   r=runH([['2026-08-20','HSA · 处方药',45.5,'','']],
-         [['Cash','2026-08-01',2500,'',2000,'',''],
-          ['Investment','2026-08-01',10000,10,'','','']]).r;
+         [['Cash','2026-08-01',2500,'',2000,'biweekly','',''],
+          ['Investment','2026-08-01',10000,10,'','','','']]).r;
   near('Cash 直接减，没被扫', r.cash, 2454.5);
   near('Investment 一分没动', r.investment, 10000);
 
   // 两个发薪日：第二次从上次结息日续滚
   r=runH([['2026-08-01','HSA · Income · 供款',250,'',''],
           ['2026-08-15','HSA · Income · 供款',250,'','']],
-         [['Cash','2026-08-01',2000,'',2000,'',''],
-          ['Investment','2026-08-01',10000,10,'','','']]).r;
+         [['Cash','2026-08-01',2000,'',2000,'biweekly','',''],
+          ['Investment','2026-08-01',10000,10,'','','','']]).r;
   near('两次扫入且中间正确结息', r.investment, 10250*Math.pow(1+DAILY,14)+250);
 
   // 补记更早的开销 → 自愈
   const base=[['2026-08-15','HSA · Income · 供款',250,'','']];
-  const seed=[['Cash','2026-08-01',1900,'',2000,'',''],
-              ['Investment','2026-08-01',10000,10,'','','']];
+  const seed=[['Cash','2026-08-01',1900,'',2000,'biweekly','',''],
+              ['Investment','2026-08-01',10000,10,'','','','']];
   near('补记前 Cash 被扫到 Floor', runH(base,seed).r.cash, 2000);
   const after=runH([['2026-08-05','HSA · 医疗',300,'',''],...base],seed).r;
   near('补记 8/05 的 300 后自愈重算', after.cash, 1850);
@@ -435,8 +435,10 @@ console.log('\n— HSA 余额引擎 —');
      w.eval("DATA.hsa.groups[0].holdings.find(x=>x.sym==='Investment').mv")===10287);
   ok('HSA 总额 = 两者之和', w.eval("classTotal.hsa")===12287, '$'+w.eval("classTotal.hsa"));
   w.openDetail('hsa');
-  ok('页面标出转投下限', /超 \$2,000 自动转投/.test(w.document.getElementById('d-body').textContent));
-  ok('页面标出结息日', /结息至 2026\/08\/15/.test(w.document.getElementById('d-body').textContent));
+  ok('Cash 行标出自动补仓频率',
+     /自动补仓 · 每两周/.test(w.document.getElementById('d-body').textContent));
+  ok('Investment 行灰字是「基金定投」',
+     /基金定投/.test(w.document.getElementById('d-body').textContent));
 }
 
 // ══════════════ 八、HSA 表的旧表头迁移 ══════════════
@@ -444,7 +446,7 @@ console.log('\n— HSA 余额引擎 —');
 // 旧表 B1 写着「Amount」，非空，会被误判成「表头没问题」而带错语义继续算。
 console.log('\n— HSA 旧表头迁移 —');
 {
-  const HHEAD=['Name','Anchor Date','Anchor Amount','Rate','Floor','Balance(自动算)','Updated'];
+  const HHEAD=['Name','Anchor Date','Anchor Amount','Rate','Floor','Sweep','Balance(自动算)','Updated'];
   function runOn(hsaRows){
     const H=mkSheet('HSA',hsaRows);
     const tabs={HSA:H, Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
@@ -457,9 +459,9 @@ console.log('\n— HSA 旧表头迁移 —');
     return {r:J(doGet({parameter:{}})).hsa, H};
   }
   // 旧表：表头 Account / Amount，行序也反着（Investment 在前）
-  let {r,H}=runOn([['Account','Amount','','','','',''],
-                   ['Investment','','','','','',''],
-                   ['Cash','','','','','','']]);
+  let {r,H}=runOn([['Account','Amount','','','','','',''],
+                   ['Investment','','','','','','',''],
+                   ['Cash','','','','','','','']]);
   ok('旧表头被改写成新表头', H._rows[0][1]==='Anchor Date', String(H._rows[0][1]));
   ok('Investment 的 Rate 补上默认 10', Number(H._rows[1][3])===10, String(H._rows[1][3]));
   ok('Cash 的 Floor 补上默认 2000', Number(H._rows[2][4])===2000, String(H._rows[2][4]));
@@ -469,8 +471,8 @@ console.log('\n— HSA 旧表头迁移 —');
 
   // 已经是新表头的，不重复改写、也不覆盖你填的值
   const {H:H2}=runOn([HHEAD,
-                      ['Cash','2026-08-01',1500,'',1000,'',''],
-                      ['Investment','2026-08-01',5000,7,'','','']]);
+                      ['Cash','2026-08-01',1500,'',1000,'monthly','',''],
+                      ['Investment','2026-08-01',5000,7,'','','','']]);
   ok('已填的 Floor 不被默认值覆盖', Number(H2._rows[1][4])===1000, String(H2._rows[1][4]));
   ok('已填的 Rate 不被默认值覆盖', Number(H2._rows[2][3])===7, String(H2._rows[2][3]));
   ok('已填的锚点不被动', String(H2._rows[1][1])==='2026-08-01' && Number(H2._rows[1][2])===1500);
@@ -601,4 +603,53 @@ console.log('\n— HSA 输入路径 —');
      `${autoB.length} 笔 / ${dueB.length} 个发薪日`);
   ok('只补了本人供款，没凭空造雇主补助',
      autoB.every(c=>c.key.indexOf('hsaee:')===0), autoB.map(c=>c.key).join(','));
+}
+
+// ══════════════ 十一、自动补仓频率 ══════════════
+// 原本每个收入日都做一次「结息 + 扫超额」，现在按 Sweep 列的频率来：
+// 每两周 / 每月 / 每季度。频率变了，Investment 的复利节奏也跟着变。
+console.log('\n— 自动补仓频率 —');
+{
+  const HH=['Name','Anchor Date','Anchor Amount','Rate','Floor','Sweep','Balance(自动算)','Updated'];
+  // 8/01 起每两周发一次薪，共 5 次：8/01 8/15 8/29 9/12 9/26
+  const led=[]; let dd=new Date('2026-08-01T00:00:00');
+  for(let i=0;i<5;i++){ const t=`${dd.getFullYear()}-${pad(dd.getMonth()+1)}-${pad(dd.getDate())}`;
+    led.push([t,'HSA · Income · 供款',500,'','']); dd=new Date(dd); dd.setDate(dd.getDate()+14); }
+  function withFreq(freq){
+    const L=mkSheet('Ledger',[['Date','category','amount','note','key'],...led]);
+    const H=mkSheet('HSA',[HH,['Cash','2026-08-01',2000,'',2000,freq,'',''],
+                              ['Investment','2026-08-01',10000,10,'','','','']]);
+    const tabs={Ledger:L,HSA:H,
+      Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+      Anchor:mkSheet('Anchor',[['date','amount','note']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[])};
+    const {doGet}=backend(tabs);
+    return J(doGet({parameter:{}})).hsa;
+  }
+  const bi=withFreq('biweekly'), mo=withFreq('monthly'), qu=withFreq('quarterly');
+  ok('频率被读出来', bi.sweep==='biweekly' && mo.sweep==='monthly' && qu.sweep==='quarterly',
+     `${bi.sweep}/${mo.sweep}/${qu.sweep}`);
+  // 每两周：5 次全扫 → Cash 回到 2000，Investment 拿到 5×500
+  ok('每两周：每次发薪都补仓，Cash 回到下限', Math.abs(bi.cash-2000)<0.01, '$'+bi.cash);
+  ok('每两周：扫入总额 = 5×500', bi.investment>10000+2400, '$'+bi.investment);
+  // 每季度：只有第一次（8/01）触发，之后 3 个月内不再补仓
+  ok('每季度：只补仓一次，其余留在 Cash', qu.cash>2000, '$'+qu.cash);
+  ok('每季度末次补仓日仍是 8/01', qu.lastSweep==='2026-08-01', qu.lastSweep);
+  ok('频率越低，留在 Cash 的越多', qu.cash>mo.cash && mo.cash>=bi.cash,
+     `每两周 ${bi.cash} / 每月 ${mo.cash} / 每季度 ${qu.cash}`);
+  ok('频率越低，扫进投资的越少', bi.investment>mo.investment && mo.investment>qu.investment,
+     `${bi.investment} / ${mo.investment} / ${qu.investment}`);
+  // 本金 = Cash 起算 2000 + Investment 起算 10000 + 供款 5×500 = 14500。
+  // 每季度只在 8/01 补过一次仓、且那次距锚点 0 天，所以一分收益都没滚到，
+  // 合计恰好等于本金；每两周补了 5 次，早进去的钱多滚了一段，合计更高。
+  // 两者之差就是「补仓越勤，收益越多」的量化体现 —— 不是不守恒。
+  const PRIN=2000+10000+5*500;
+  ok('每季度：只补一次且距锚点 0 天，合计恰等于本金',
+     Math.abs((qu.cash+qu.investment)-PRIN)<0.01, `${(qu.cash+qu.investment).toFixed(2)} vs ${PRIN}`);
+  ok('每两周：合计高于本金，多出来的就是多滚的收益',
+     (bi.cash+bi.investment)>PRIN,
+     `多 $${((bi.cash+bi.investment)-PRIN).toFixed(2)}`);
+  ok('留空时默认每两周（保持原行为）', withFreq('').sweep==='biweekly');
 }

@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  v8  (2026-08-30)
+ * 资产驾驶舱 · Google Apps Script 后端  v9  (2026-08-30)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -7,6 +7,15 @@
  * 时区：America/Phoenix（Arizona 不用夏令时）
  *
  * ── 改动记录（每次改代码请在最上方补一条，旧条目保留）──────────────
+ *
+ * v9  2026-08-30  HSA 自动补仓频率
+ *   · HSA 表新增 F:Sweep 列（Cash 行），可选 biweekly / monthly / quarterly，
+ *     留空默认 biweekly（与之前「每个收入日都补」的行为一致）。
+ *     Balance / Updated 顺延到 G / H
+ *   · 原先每个收入日都做一次「结息 + 扫超额」，现在按 Sweep 的频率来：
+ *     从锚点当天起算，每满一个周期才在下一个收入日做一次再分配
+ *   · 频率越低留在 Cash 的越多、扫进投资的越少，投资复利的节奏也跟着变
+ *   · updateHsa 支持改 sweep
  *
  * v8  2026-08-30  修 HSA 表的迁移
  *   · hsaSheet 的表头检查原先只判断 B1 是否为空。若 HSA 表是更早手工建的
@@ -876,9 +885,19 @@ function cleanBackfill() {
 //
 // 账户之间的搬动不写 Ledger —— 那是 HSA 内部的事，写进去会污染
 // 「本月存入 / 本月开销」两个合计。余额本身回写到 F 列做备份。
-var HSA_COL = { NAME:1, ADATE:2, AAMT:3, RATE:4, FLOOR:5, BAL:6, UPD:7 };
+var HSA_COL = { NAME:1, ADATE:2, AAMT:3, RATE:4, FLOOR:5, SWEEP:6, BAL:7, UPD:8 };
 var HSA_HEAD = ["Name", "Anchor Date", "Anchor Amount", "Rate", "Floor",
-                "Balance(自动算)", "Updated"];
+                "Sweep", "Balance(自动算)", "Updated"];
+// 自动补仓频率：多久做一次「结算投资收益 + 把 Cash 超出部分扫进投资」
+var SWEEP_MONTHS = { biweekly: 0, monthly: 1, quarterly: 3 };   // biweekly 特判为 14 天
+function normSweep(v) {
+  var t = (v || "").toString().trim().toLowerCase();
+  return SWEEP_MONTHS.hasOwnProperty(t) ? t : "biweekly";
+}
+function nextSweepDate(d, freq) {
+  if (freq === "biweekly") { var x = new Date(d.getTime()); x.setDate(x.getDate() + 14); return x; }
+  return new Date(d.getFullYear(), d.getMonth() + (SWEEP_MONTHS[freq] || 1), d.getDate());
+}
 
 function hsaSheet(ss) {
   var sh = ss.getSheetByName("HSA");
@@ -886,8 +905,8 @@ function hsaSheet(ss) {
     sh = ss.insertSheet("HSA");
     sh.getRange(1, 1, 3, HSA_HEAD.length).setValues([
       HSA_HEAD,
-      ["Cash", "", 0, "", 2000, "", ""],
-      ["Investment", "", 0, 10, "", "", ""]
+      ["Cash", "", 0, "", 2000, "biweekly", "", ""],
+      ["Investment", "", 0, 10, "", "", "", ""]
     ]);
     return sh;
   }
@@ -912,6 +931,9 @@ function hsaSheet(ss) {
       if (nm === "cash" && body[i][HSA_COL.FLOOR - 1] === "") {
         body[i][HSA_COL.FLOOR - 1] = 2000; dirty = true;
       }
+      if (nm === "cash" && body[i][HSA_COL.SWEEP - 1] === "") {
+        body[i][HSA_COL.SWEEP - 1] = "biweekly"; dirty = true;
+      }
     }
     if (dirty) sh.getRange(2, 1, last - 1, HSA_HEAD.length).setValues(body);
   }
@@ -933,7 +955,8 @@ function readHsaRows(sh) {
       adate: s2d(v[i][HSA_COL.ADATE - 1]),
       aamt: parseFloat(v[i][HSA_COL.AAMT - 1]) || 0,
       rate: normRate(v[i][HSA_COL.RATE - 1]),
-      floor: parseFloat(v[i][HSA_COL.FLOOR - 1]) || 0
+      floor: parseFloat(v[i][HSA_COL.FLOOR - 1]) || 0,
+      sweep: normSweep(v[i][HSA_COL.SWEEP - 1])
     };
   }
   return out;
@@ -979,6 +1002,9 @@ function runHsa(ss, lv) {
   var cash = C.aamt, inv = I.aamt;
   var invPost = I.adate || C.adate || todaySv();
   var floor = C.floor;
+  var sweepFreq = C.sweep;
+  // 从锚点当天开始就允许补仓；之后每满一个周期才再做一次
+  var sweepDue = C.adate || I.adate || todaySv();
   var lastSweep = "";
 
   // 按天分组重放：先把当天的流水全部记上，再判断当天是不是再分配日
@@ -992,6 +1018,7 @@ function runHsa(ss, lv) {
     }
     if (!hasIncome) continue;               // 只有开销的日子不做再分配
     var dayD = s2d(day);
+    if (dayD < sweepDue) continue;          // 还没到下一次自动补仓的时点
     inv += accrue(inv, I.rate, dayDiff(invPost, dayD));   // ① 先结算投资收益
     invPost = dayD;
     if (cash > floor) {                                   // ② 超出部分转入投资
@@ -999,6 +1026,7 @@ function runHsa(ss, lv) {
       cash = floor;
       lastSweep = day;
     }
+    sweepDue = nextSweepDate(dayD, sweepFreq);            // ③ 排下一次
   }
 
   var today = d2s(todaySv());
@@ -1007,7 +1035,7 @@ function runHsa(ss, lv) {
   return {
     cash: Math.round(cash * 100) / 100,
     investment: Math.round(inv * 100) / 100,
-    rate: I.rate, floor: floor,
+    rate: I.rate, floor: floor, sweep: sweepFreq,
     anchorDate: startS || "", lastSweep: lastSweep,
     invPost: d2s(invPost), updated: today, ready: true
   };
@@ -1027,6 +1055,7 @@ function updateHsa(ss, data) {
   }
   if (data.rate != null && data.rate !== "")  out[HSA_COL.RATE - 1]  = normRate(data.rate);
   if (data.floor != null && data.floor !== "") out[HSA_COL.FLOOR - 1] = parseFloat(data.floor) || 0;
+  if (data.sweep) out[HSA_COL.SWEEP - 1] = normSweep(data.sweep);
   sh.getRange(r.row, 1, 1, HSA_HEAD.length).setValues([out]);
   return { status: "success", type: "updateHsa", hsa: safeRun(function () { return runHsa(ss); }, null) };
 }
