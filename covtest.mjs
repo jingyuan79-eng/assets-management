@@ -530,3 +530,75 @@ console.log('\n— HSA 页的固定支出 —');
   ok('已记过的那笔流水仍在（不该被连带删掉）',
      /每月理疗/.test(d.getElementById('hsaTabBody').textContent));
 }
+
+// ══════════════ 十、HSA 输入路径的往返与阻塞 ══════════════
+// 现金页踩过两个坑：① 已写过的 key 每次打开重发一遍（窗口没对齐）
+// ② 界面渲染排在串行写请求之后。HSA 复用了同一套机制，这里逐条盯住。
+console.log('\n— HSA 输入路径 —');
+{
+  const fmtd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const ago=n=>{const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-n);return d;};
+  const CFG={employee:250,employer:100,freq:'biweekly',start:fmtd(ago(56))};
+  // 历史供款都已记过
+  const seeded=(()=>{ const r=[]; let n=100; let d=ago(56);
+    while(d<=new Date()){ const ds=fmtd(d);
+      r.push({row:++n,date:ds,category:'HSA · Income · 供款',amount:250,note:'本人供款',key:'hsaee:'+ds});
+      r.push({row:++n,date:ds,category:'HSA · Income · 雇主补助',amount:100,note:'雇主补助',key:'hsaer:'+ds});
+      d=new Date(d); d.setDate(d.getDate()+14); }
+    return r; })();
+  function app(ledger,cfg){
+    const calls=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        if(cfg) w.localStorage.setItem('hsaConfig_v1', JSON.stringify(cfg));
+        w.fetch=(u)=>{ const a=new URL(u).searchParams.get('action');
+          if(a){ calls.push(Object.fromEntries(new URL(u).searchParams));
+            return new Promise(r=>setTimeout(()=>r({json:async()=>({status:'success',row:9})}),10)); }
+          return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},
+            ledger:ledger,monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},
+            savings:[],bond:[],notices:[],
+            hsa:{cash:2000,investment:5000,rate:0.1,floor:2000,ready:true},
+            retire:[],serverDate:fmtd(new Date())})}); };
+        w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, calls};
+  }
+
+  // ① 打开 App：供款已全部记过 → 一次写请求都不该发
+  let a=app(seeded, CFG); await wait(500);
+  ok('打开 App 不重发已记过的供款', a.calls.length===0, `发了 ${a.calls.length} 次`);
+
+  // ② 补记窗口必须落在后端 70 天明细之内，否则去重查不到、每次都白跑
+  const dues=JSON.parse(a.w.eval("JSON.stringify(hsaPayDatesDue(loadHsaCfg()))"));
+  ok('供款补记窗口被 70 天明细覆盖', dues[0]>=fmtd(ago(70)), `最早应记日 ${dues[0]}`);
+
+  // ③ 一次同步不该把 HSA 页重绘很多次
+  a=app(seeded, CFG); await wait(500);
+  a.w.openDetail('hsa');
+  let n=0; const orig=a.w.renderHsa;
+  a.w.renderHsa=function(){ n++; return orig.apply(this,arguments); };
+  await a.w.eval("syncStockFromSheet()"); await wait(500);
+  ok('一次同步的 HSA 重绘次数 ≤ 2', n<=2, `${n} 次`);
+
+  // ④ 首次配置供款：界面必须先出来，十几次串行往返不能挡在前面
+  const b=app([], null); await wait(500);
+  const d2=b.w.document;
+  b.w.openDetail('hsa'); b.w.switchHsaTab('in'); b.w.showHsaCfgForm();
+  d2.getElementById('hsa-amt').value='250';
+  d2.getElementById('hsa-freq').value='biweekly';
+  d2.getElementById('hsa-start').value=fmtd(ago(56));
+  b.w.saveHsaCfgForm();
+  const txt=d2.getElementById('hsaTabBody').textContent;
+  ok('点保存后立刻显示配置', /已设/.test(txt) && /250/.test(txt), txt.slice(0,40));
+  ok('此刻后台写请求一次都还没回来',
+     b.calls.filter(c=>c.action==='autoLedger').length===0);
+  await wait(1500);
+  ok('后台补记完成后明细才出现', /本人供款/.test(d2.getElementById('hsaTabBody').textContent));
+  // 表单里只填了 Employee 一项，所以每个发薪日只补 1 笔（雇主那笔没配就不发）
+  const autoB=b.calls.filter(c=>c.action==='autoLedger');
+  const dueB=JSON.parse(b.w.eval("JSON.stringify(hsaPayDatesDue(loadHsaCfg()))"));
+  ok('每个发薪日补一笔，不多不少', autoB.length===dueB.length,
+     `${autoB.length} 笔 / ${dueB.length} 个发薪日`);
+  ok('只补了本人供款，没凭空造雇主补助',
+     autoB.every(c=>c.key.indexOf('hsaee:')===0), autoB.map(c=>c.key).join(','));
+}

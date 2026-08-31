@@ -549,8 +549,7 @@ function syncStockFromSheet(){
       setSyncBadge('ok');
       recompute();
       renderNotices();
-      refreshLedgerViews();
-      refreshOpenDetail();
+      refreshOpenDetail();   // 内部已整页重建，不必再单独刷一次明细列表
 
       // 固定支出 / 工资 / 定期转账：后台补记，写完再刷一次（Sheet 端按 key 去重）
       return runFixedExpenses()
@@ -561,7 +560,6 @@ function syncStockFromSheet(){
           rebuildMonthExpense();
           recompute();
           renderNotices();
-          refreshLedgerViews();
           refreshOpenDetail();
         });
     })
@@ -2082,7 +2080,11 @@ function saveHsaCfgForm(){
               freq:c.freq||'biweekly', start:c.start});
   hsaCfgDraft=null;
   const w=document.getElementById('hsaCfgWrap'); if(w) w.innerHTML='';
-  runHsaContrib().then(function(){ openDetail('hsa', true); });
+  // 先把配置显示出来，历史供款的补记放后台跑完再刷一次。
+  // 首次配置可能要补十几个发薪日，每笔一次 Apps Script 往返，
+  // 挡在渲染前面会让「保存」看起来卡死十几秒。
+  openDetail('hsa', true);
+  runHsaContrib().then(function(){ recompute(); openDetail('hsa', true); });
 }
 
 // ---- 明细 ----
