@@ -438,3 +438,40 @@ console.log('\n— HSA 余额引擎 —');
   ok('页面标出转投下限', /超 \$2,000 自动转投/.test(w.document.getElementById('d-body').textContent));
   ok('页面标出结息日', /结息至 2026\/08\/15/.test(w.document.getElementById('d-body').textContent));
 }
+
+// ══════════════ 八、HSA 表的旧表头迁移 ══════════════
+// 表可能是更早手工建的（表头 Account / Amount）。只判断 B1 是否为空不够 ——
+// 旧表 B1 写着「Amount」，非空，会被误判成「表头没问题」而带错语义继续算。
+console.log('\n— HSA 旧表头迁移 —');
+{
+  const HHEAD=['Name','Anchor Date','Anchor Amount','Rate','Floor','Balance(自动算)','Updated'];
+  function runOn(hsaRows){
+    const H=mkSheet('HSA',hsaRows);
+    const tabs={HSA:H, Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+      Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+      Anchor:mkSheet('Anchor',[['date','amount','note']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[])};
+    const {doGet}=backend(tabs);
+    return {r:J(doGet({parameter:{}})).hsa, H};
+  }
+  // 旧表：表头 Account / Amount，行序也反着（Investment 在前）
+  let {r,H}=runOn([['Account','Amount','','','','',''],
+                   ['Investment','','','','','',''],
+                   ['Cash','','','','','','']]);
+  ok('旧表头被改写成新表头', H._rows[0][1]==='Anchor Date', String(H._rows[0][1]));
+  ok('Investment 的 Rate 补上默认 10', Number(H._rows[1][3])===10, String(H._rows[1][3]));
+  ok('Cash 的 Floor 补上默认 2000', Number(H._rows[2][4])===2000, String(H._rows[2][4]));
+  ok('行序颠倒也能按名字认出来', r && r.ready===true);
+  ok('Floor 不会因为留空而变成 0（否则 Cash 会被全额扫走）', r.floor===2000, String(r.floor));
+  ok('Rate 不会因为留空而变成 0', Math.abs(r.rate-0.10)<1e-9, String(r.rate));
+
+  // 已经是新表头的，不重复改写、也不覆盖你填的值
+  const {H:H2}=runOn([HHEAD,
+                      ['Cash','2026-08-01',1500,'',1000,'',''],
+                      ['Investment','2026-08-01',5000,7,'','','']]);
+  ok('已填的 Floor 不被默认值覆盖', Number(H2._rows[1][4])===1000, String(H2._rows[1][4]));
+  ok('已填的 Rate 不被默认值覆盖', Number(H2._rows[2][3])===7, String(H2._rows[2][3]));
+  ok('已填的锚点不被动', String(H2._rows[1][1])==='2026-08-01' && Number(H2._rows[1][2])===1500);
+}

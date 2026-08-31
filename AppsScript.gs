@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  v7  (2026-08-30)
+ * 资产驾驶舱 · Google Apps Script 后端  v8  (2026-08-30)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -7,6 +7,15 @@
  * 时区：America/Phoenix（Arizona 不用夏令时）
  *
  * ── 改动记录（每次改代码请在最上方补一条，旧条目保留）──────────────
+ *
+ * v8  2026-08-30  修 HSA 表的迁移
+ *   · hsaSheet 的表头检查原先只判断 B1 是否为空。若 HSA 表是更早手工建的
+ *     （表头 Account / Amount），B1 非空会被误判成「表头没问题」，
+ *     引擎于是按 B=起算日、C=起算金额去读一张语义完全不同的表。
+ *     改为比对 B1 是否等于「Anchor Date」，不等就一次性改写表头
+ *   · Rate / Floor 留空会算出「投资不增值」和「Cash 被全额扫走」两个
+ *     危险结果，现在补上默认值（10 / 2000）并写回表里，让你看得见改得动。
+ *     已经填了值的不覆盖
  *
  * v7  2026-08-29  HSA 第三步：余额搬进 Sheet，后端计算
  *   · 新增 HSA 表（脚本会自建）：固定两行 Cash / Investment
@@ -882,8 +891,30 @@ function hsaSheet(ss) {
     ]);
     return sh;
   }
+  // 表已存在但表头不是我们这一套（比如更早手工建的 Account / Amount）：
+  // 一次性改写表头。只认 B 列的标题，判空是不够的 —— 旧表 B1 写着
+  // 「Amount」，非空，会被误判成「表头没问题」而带着错误语义继续算。
   var h = sh.getRange(1, 1, 1, HSA_HEAD.length).getValues()[0];
-  if (!h[HSA_COL.ADATE - 1]) sh.getRange(1, 1, 1, HSA_HEAD.length).setValues([HSA_HEAD]);
+  if ((h[HSA_COL.ADATE - 1] || "").toString().trim() !== HSA_HEAD[HSA_COL.ADATE - 1]) {
+    sh.getRange(1, 1, 1, HSA_HEAD.length).setValues([HSA_HEAD]);
+  }
+  // Rate / Floor 留空会算出「不增值」和「Cash 全额扫走」两个危险结果，
+  // 所以补上文档写明的默认值，并写回表里让你看得见、改得动。
+  var last = sh.getLastRow();
+  if (last >= 2) {
+    var body = sh.getRange(2, 1, last - 1, HSA_HEAD.length).getValues();
+    var dirty = false;
+    for (var i = 0; i < body.length; i++) {
+      var nm = (body[i][HSA_COL.NAME - 1] || "").toString().trim().toLowerCase();
+      if (nm === "investment" && body[i][HSA_COL.RATE - 1] === "") {
+        body[i][HSA_COL.RATE - 1] = 10; dirty = true;
+      }
+      if (nm === "cash" && body[i][HSA_COL.FLOOR - 1] === "") {
+        body[i][HSA_COL.FLOOR - 1] = 2000; dirty = true;
+      }
+    }
+    if (dirty) sh.getRange(2, 1, last - 1, HSA_HEAD.length).setValues(body);
+  }
   return sh;
 }
 
