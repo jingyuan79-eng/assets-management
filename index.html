@@ -775,7 +775,7 @@ function fixedFormHtml(v, cat){
     '</div></div>':'')+
   '</div>';
 }
-function cancelFixedForm(){ editingFixedId=null; renderCashTabBody(); }
+function cancelFixedForm(){ editingFixedId=null; refreshLedgerViews(); }
 function showFixedForm(cat){
   const w=document.getElementById('fixedFormWrap');
   if(!w) return;
@@ -811,21 +811,21 @@ function saveFixed_(cat){
   }
   saveFixed(list);
   editingFixedId=null;
-  renderCashTabBody();
+  refreshLedgerViews();          // 固定支出区块在现金页和 HSA 页都有，两边都要刷
   runFixedExpenses().then(function(){
-    rebuildMonthExpense(); recompute(); renderCashTabBody();
+    rebuildMonthExpense(); recompute(); refreshLedgerViews();
   });
 }
 function toggleFixed(id){
   const list=loadFixed();
   const it=list.find(function(x){ return x.id===id; });
   if(it){ it.enabled=(it.enabled===false); saveFixed(list); }
-  editingFixedId=null; renderCashTabBody();
+  editingFixedId=null; refreshLedgerViews();
 }
 function deleteFixed(id){
   if(!confirm('删除这项固定支出？\n已经记过的账不会被删。')) return;
   saveFixed(loadFixed().filter(function(x){ return x.id!==id; }));
-  editingFixedId=null; renderCashTabBody();
+  editingFixedId=null; refreshLedgerViews();
 }
 
 // ==================== 收入引擎（写进 Ledger，靠 key 防重复）====================

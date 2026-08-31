@@ -475,3 +475,58 @@ console.log('\n— HSA 旧表头迁移 —');
   ok('已填的 Rate 不被默认值覆盖', Number(H2._rows[2][3])===7, String(H2._rows[2][3]));
   ok('已填的锚点不被动', String(H2._rows[1][1])==='2026-08-01' && Number(H2._rows[1][2])===1500);
 }
+
+// ══════════════ 九、HSA 页的固定支出要能存进去并立刻显示 ══════════════
+// 固定支出区块在现金页和 HSA 页都有。这组函数原本只调 renderCashTabBody()，
+// 在 HSA 页上是空操作 —— 数据存了、请求发了，但界面不动，看起来像「点保存没反应」。
+console.log('\n— HSA 页的固定支出 —');
+{
+  const today=new Date(); const ym=`${today.getFullYear()}-${pad(today.getMonth()+1)}`;
+  const calls=[];
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+        if(a){ calls.push(Object.fromEntries(url.searchParams));
+               return Promise.resolve({json:async()=>({status:'success',row:50})}); }
+        return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+          monthly:{},ledgerMonths:[ym],cash:{balance:0,hasAnchor:false},savings:[],bond:[],
+          notices:[],hsa:{cash:2000,investment:5000,rate:0.1,floor:2000,ready:true},
+          retire:[],serverDate:'2026-08-30'})}); };
+      w.alert=(m)=>{ w.__alert=m; }; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window, d=w.document;
+  await wait();
+  w.openDetail('hsa'); w.switchHsaTab('ex');
+  ok('HSA 支出页有固定支出区块', !!d.getElementById('fixedFormWrap'));
+
+  w.showFixedForm('HSA · 医疗');
+  ok('点「添加固定支出」能打开表单', !!d.getElementById('fx-name'));
+  d.getElementById('fx-name').value='每月理疗';
+  d.getElementById('fx-amt').value='120';
+  d.getElementById('fx-freq').value='monthly';
+  d.getElementById('fx-start').value=`${ym}-10`;
+  w.saveFixed_('HSA · 医疗');
+  await wait();
+
+  const saved=JSON.parse(w.localStorage.getItem('fixedExpenses_v1')||'[]');
+  ok('配置存下来了', saved.length===1 && saved[0].category==='HSA · 医疗', JSON.stringify(saved));
+  ok('没有弹出报错', !w.__alert, String(w.__alert||''));
+  ok('表单关掉了（不再杵在那儿）', !d.getElementById('fx-name'));
+  ok('列表里立刻显示出来（这就是原来「点保存没反应」的地方）',
+     /每月理疗/.test(d.getElementById('hsaTabBody').textContent));
+  ok('发出了 HSA 分类的自动记账',
+     calls.some(c=>c.action==='autoLedger' && c.category==='HSA · 医疗' && +c.amount===120),
+     calls.filter(c=>c.action==='autoLedger').map(c=>c.category).join(','));
+  ok('这笔不进流动现金', w.eval("catSign('HSA · 医疗')")===0);
+
+  // 停用 / 删除也要立刻反映
+  w.toggleFixed(saved[0].id);
+  ok('停用后列表立刻标注', /已停用/.test(d.getElementById('hsaTabBody').textContent));
+  w.deleteFixed(saved[0].id);
+  // 注意：删的是「配置」，已经记过的那笔流水按设计保留（确认框里写明了），
+  // 所以明细里仍能看到「每月理疗（固定）」——不能拿整页文字来断言。
+  ok('删除后配置清空', w.eval("loadFixed().length")===0);
+  ok('固定支出区块里不再列出它', !/已停用/.test(d.getElementById('hsaTabBody').textContent));
+  ok('已记过的那笔流水仍在（不该被连带删掉）',
+     /每月理疗/.test(d.getElementById('hsaTabBody').textContent));
+}
