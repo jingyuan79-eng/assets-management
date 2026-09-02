@@ -323,6 +323,18 @@ const SYM_DESC = {
 
 // ==================== localStorage ====================
 // 清掉历史遗留的键（储蓄已迁到 Sheet，不再本地存）
+// 配置写入 localStorage。失败必须让人看见 —— 静默失败的表现就是
+// 「点了保存像没保存上」，下次打开配置也不见了，很难查。
+function persistCfg(key, val, label){
+  try{ localStorage.setItem(key, JSON.stringify(val)); return true; }
+  catch(e){
+    console.log('配置写入失败', key, e);
+    alert('保存失败：浏览器不让写入本地存储。\n'+
+          (label?('「'+label+'」的设置没有保存。\n'):'')+
+          '常见原因是隐私模式，或存储空间已满。');
+    return false;
+  }
+}
 function cleanLegacyKeys(){
   ['assetAdditions','cdList','bondList','bondList_v2','cdList_v3','cashList_v1',
    'expenseDeducted_v1','expenseDeducted_v2'].forEach(function(k){
@@ -657,7 +669,7 @@ function setCashFromServer(info){
 function loadFixed(){
   try{ return JSON.parse(localStorage.getItem('fixedExpenses_v1')||'[]'); }catch(e){ return []; }
 }
-function saveFixed(list){ localStorage.setItem('fixedExpenses_v1', JSON.stringify(list)); }
+function saveFixed(list){ return persistCfg('fixedExpenses_v1', list, '固定支出'); }
 
 const FREQ_LABEL={monthly:'每月',quarterly:'每季度',semiannual:'每半年',annual:'每年'};
 const FREQ_MONTHS={monthly:1,quarterly:3,semiannual:6,annual:12};
@@ -810,7 +822,7 @@ function saveFixed_(cat){
     list.push({id:'f'+Date.now(), name:name, amount:Math.round(amt*100)/100,
                category:cat, freq:freq, start:start, enabled:true});
   }
-  saveFixed(list);
+  if(!saveFixed(list)) return;
   editingFixedId=null;
   refreshLedgerViews();          // 固定支出区块在现金页和 HSA 页都有，两边都要刷
   runFixedExpenses().then(function(){
@@ -834,7 +846,7 @@ function loadIncome(){
   try{ return JSON.parse(localStorage.getItem('incomeConfig_v1')||'{"payroll":null}'); }
   catch(e){ return {payroll:null}; }
 }
-function saveIncome(cfg){ localStorage.setItem('incomeConfig_v1', JSON.stringify(cfg)); }
+function saveIncome(cfg){ return persistCfg('incomeConfig_v1', cfg, 'Payroll'); }
 
 function nextPayDate(d, freq){
   const n=new Date(d);
@@ -1980,9 +1992,7 @@ function switchHsaTab(t){ hsaTab=t; editingLedgerRow=null; renderHsa(); }
 function loadHsaCfg(){
   try{ return JSON.parse(localStorage.getItem('hsaConfig_v1')||'{}'); }catch(e){ return {}; }
 }
-function saveHsaCfg(c){
-  try{ localStorage.setItem('hsaConfig_v1', JSON.stringify(c)); }catch(e){}
-}
+function saveHsaCfg(c){ return persistCfg('hsaConfig_v1', c, 'HSA 供款'); }
 // 与 payDatesDue 同一套规则：从起始日按频率推进，只列最近 60 天内到期的
 function hsaPayDatesDue(cfg){
   const out=[];
@@ -2088,8 +2098,8 @@ function saveHsaCfgForm(){
   const c=hsaCfgDraft||{};
   if(!((c.employee>0)||(c.employer>0))){ alert('请至少填写本人或雇主其中一项金额'); return; }
   if(!c.start){ alert('请填写起始发薪日'); return; }
-  saveHsaCfg({employee:Math.round(c.employee||0), employer:Math.round(c.employer||0),
-              freq:c.freq||'biweekly', start:c.start});
+  if(!saveHsaCfg({employee:Math.round(c.employee||0), employer:Math.round(c.employer||0),
+                  freq:c.freq||'biweekly', start:c.start})) return;
   hsaCfgDraft=null;
   const w=document.getElementById('hsaCfgWrap'); if(w) w.innerHTML='';
   // 先把配置显示出来，历史供款的补记放后台跑完再刷一次。
@@ -2300,7 +2310,7 @@ function doTransfer(srcKey, tgtKey, amt, dateStr, dedupeKey){
 function loadRecurring(){
   try{ return JSON.parse(localStorage.getItem('recurringTransfers_v1')||'[]'); }catch(e){ return []; }
 }
-function saveRecurring(list){ localStorage.setItem('recurringTransfers_v1', JSON.stringify(list)); }
+function saveRecurring(list){ return persistCfg('recurringTransfers_v1', list, '定期转账'); }
 const XFER_FREQ={weekly:'每周',biweekly:'每两周',monthly:'每月'};
 function nextByFreq(d, freq){
   const n=new Date(d);
@@ -2783,7 +2793,7 @@ function savePayroll(){
   const cfg=loadIncome();
   cfg.payroll={amount:Math.round(amt), start:start, freq:freq};
   delete cfg.paidTotal; delete cfg.lastPayDate;   // 旧版遗留字段，不再需要
-  saveIncome(cfg);
+  if(!saveIncome(cfg)) return;
   // 先把配置显示出来，历史工资的补记放后台跑完再刷一次。
   // 补记可能有好几个发薪日，每笔一次 Apps Script 往返（1~3 秒），
   // 挡在渲染前面会让「保存」看起来没生效、依旧显示「未设置」。

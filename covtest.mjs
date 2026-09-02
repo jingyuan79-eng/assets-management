@@ -728,3 +728,71 @@ console.log('\n— 保存配置后立刻生效 / 跨月保留 —');
   ok('新月份里 HSA Contribution 仍显示「已设」',
      /已设/.test(dd.getElementById('hsaTabBody').textContent));
 }
+
+// ══════════════ 十三、配置写入失败必须看得见 ══════════════
+// saveIncome / saveFixed / saveRecurring 原本裸调 localStorage.setItem。
+// 一旦抛异常（隐私模式、存储满），配置静默丢失、异常还会中断后续代码 ——
+// 表现就是「点了保存像没保存上」，最难查的那种。
+console.log('\n— 配置写入失败要报出来 —');
+{
+  function app(breakWrite){
+    const alerts=[]; const calls=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        if(breakWrite){
+          // jsdom 的 Storage 上直接赋 setItem 覆盖不掉，得把整个 localStorage 换掉
+          const box={};
+          const fake={
+            getItem:(k)=>(k in box?box[k]:null),
+            setItem:(k,v)=>{ if(/incomeConfig_v1|fixedExpenses_v1|hsaConfig_v1/.test(k))
+                               throw new Error('QuotaExceededError');
+                             box[k]=String(v); },
+            removeItem:(k)=>{ delete box[k]; },
+            clear:()=>{ for(const k in box) delete box[k]; },
+            key:(i)=>Object.keys(box)[i]??null,
+            get length(){ return Object.keys(box).length; }
+          };
+          Object.defineProperty(w,'localStorage',{get:()=>fake, configurable:true});
+        }
+        w.fetch=(u)=>{ const a=new URL(u).searchParams.get('action');
+          if(a){ calls.push(a); return Promise.resolve({json:async()=>({status:'success',row:9})}); }
+          return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+            monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},savings:[],bond:[],
+            notices:[],hsa:{cash:0,investment:0,rate:0.1,floor:2000,sweep:'biweekly',ready:true},
+            retire:[],serverDate:'2026-09-01'})}); };
+        w.alert=(m)=>alerts.push(String(m)); w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, alerts, calls};
+  }
+
+  // 正常情况：静默成功，不该弹窗
+  let a=app(false); await wait(400);
+  a.w.openDetail('cash'); a.w.showPayrollForm();
+  a.w.document.getElementById('pay-amt').value='2600';
+  a.w.document.getElementById('pay-start').value='2026-08-07';
+  a.w.savePayroll(); await wait(300);
+  ok('写入正常时不弹任何提示', a.alerts.length===0, a.alerts.join('|'));
+  ok('配置存下来了', !!a.w.localStorage.getItem('incomeConfig_v1'));
+
+  // 写入被拒：必须弹窗告知，且不能继续发补记请求
+  let b=app(true); await wait(400);
+  b.w.openDetail('cash'); b.w.showPayrollForm();
+  b.w.document.getElementById('pay-amt').value='2600';
+  b.w.document.getElementById('pay-start').value='2026-08-07';
+  const nBefore=b.calls.length;
+  b.w.savePayroll(); await wait(300);
+  ok('写入失败时明确报错，不静默', b.alerts.some(m=>/保存失败/.test(m)), b.alerts.join('|'));
+  ok('报错里点名是哪项设置', b.alerts.some(m=>/Payroll/.test(m)));
+  ok('配置没存上就不发补记请求', b.calls.length===nBefore, `多发了 ${b.calls.length-nBefore} 次`);
+
+  // 固定支出同理
+  b.w.openDetail('cash'); b.w.switchCashTab('ex'); b.w.openExpenseDrill('Bill & utilities');
+  b.w.showFixedForm('Bill & utilities');
+  b.w.document.getElementById('fx-name').value='网费';
+  b.w.document.getElementById('fx-amt').value='70';
+  b.w.document.getElementById('fx-start').value='2026-08-05';
+  b.alerts.length=0;
+  b.w.saveFixed_('Bill & utilities'); await wait(300);
+  ok('固定支出写入失败也报错', b.alerts.some(m=>/保存失败/.test(m)), b.alerts.join('|'));
+  ok('报错里点名「固定支出」', b.alerts.some(m=>/固定支出/.test(m)));
+}
