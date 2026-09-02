@@ -865,3 +865,62 @@ console.log('\n— 重输配置不产生重复记账 —');
   ok('同名第二笔另给 id，不覆盖第一笔',
      list.length===2 && list[0].id!==list[1].id, list.map(x=>x.id).join(','));
 }
+
+// ══════════════ 十五、总览卡片上的年化收益率 ══════════════
+// 按金额加权平均。只有储蓄和国债有明确票面利率；股票是市值波动、
+// 现金无息、HSA 的 10% 是自设预估，都不该显示成「收益率」。
+console.log('\n— 总览卡片的年化收益率 —');
+{
+  const SAV=[{id:'s1',name:'CD-A',type:'CD',balance:30000,rate:0.05,lastPost:'2026-08-01',
+              nextUpdate:'',maturity:'2027-06-30',status:'active'},
+             {id:'s2',name:'OS-B',type:'OS',balance:10000,rate:0.03,lastPost:'2026-08-01',
+              nextUpdate:'',maturity:'',status:'active'},
+             {id:'s3',name:'旧CD',type:'CD',balance:99999,rate:0.99,lastPost:'2026-08-01',
+              nextUpdate:'',maturity:'',status:'closed'}];   // closed 不该参与
+  const BOND=[{id:'b1',name:'T-Note',type:'T-Note',start:'2026-02-15',term:2,rate:0.04,
+               principal:10000,balance:10000,lastPost:'2026-08-15',maturity:'2028-02-15',status:'active'}];
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=()=>Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+        monthly:{},ledgerMonths:[],cash:{balance:5000,hasAnchor:true,anchorDate:'2026-08-01',anchorAmount:5000},
+        savings:SAV,bond:BOND,notices:[],
+        hsa:{cash:2000,investment:5000,rate:0.1,floor:2000,sweep:'biweekly',ready:true},
+        retire:[],serverDate:'2026-09-01'})});
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window, d=w.document; await wait();
+
+  // 30000×5% + 10000×3% = 1800 → 1800/40000 = 4.5%
+  ok('储蓄按金额加权平均', Math.abs(w.eval("classYield('cd')")-4.5)<1e-9, w.eval("classYield('cd')"));
+  ok('closed 的账户不参与（否则会被 99999×99% 拉爆）',
+     w.eval("classYield('cd')")<10, w.eval("classYield('cd')"));
+  ok('国债取其票面利率', Math.abs(w.eval("classYield('bond')")-4)<1e-9, w.eval("classYield('bond')"));
+  ok('股票不给收益率', w.eval("classYield('stock')")===null);
+  ok('现金不给收益率', w.eval("classYield('cash')")===null);
+  ok('HSA 不给收益率（10% 是自设预估，不是票面）', w.eval("classYield('hsa')")===null);
+
+  const cards={};
+  [].forEach.call(d.querySelectorAll('.ccard'),function(c){
+    cards[(c.querySelector('.nm')||{}).textContent]=c; });
+  const savMeta=cards['储蓄'].querySelector('.meta').innerHTML;
+  ok('储蓄卡片显示 +4.5%', /\+4\.5%/.test(savMeta), savMeta);
+  ok('用绿色（var(--pos)）', /var\(--pos\)/.test(savMeta), savMeta);
+  ok('保留原有灰字', /Marcus/.test(savMeta), savMeta);
+  const bondMeta=cards['国债'].querySelector('.meta').innerHTML;
+  ok('国债卡片显示 +4.0%', /\+4\.0%/.test(bondMeta), bondMeta);
+  ok('格式是一位小数', !/\+4%|\+4\.00%/.test(bondMeta), bondMeta);
+  ok('股票卡片不显示收益率', !/\+\d/.test(cards['股票'].innerHTML));
+  ok('现金卡片不显示收益率', !/\+\d/.test(cards['现金'].innerHTML));
+
+  // 没有数据时不该显示 +NaN%
+  const dom2=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w2){ w2.localStorage.clear();
+      w2.fetch=()=>Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+        monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},savings:[],bond:[],notices:[],
+        hsa:null,retire:[],serverDate:'2026-09-01'})});
+      w2.alert=()=>{}; w2.confirm=()=>true; w2.scrollTo=()=>{};
+      w2.Element.prototype.scrollIntoView=function(){}; }});
+  await wait();
+  ok('没有账户时不显示 +NaN%', !/NaN/.test(dom2.window.document.body.innerHTML));
+  ok('没有账户时收益率为 null', dom2.window.eval("classYield('cd')")===null);
+}

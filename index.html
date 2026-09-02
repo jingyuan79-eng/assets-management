@@ -386,7 +386,7 @@ cleanLegacyKeys(); loadStock();
 
 // 版本号：改完代码顺手 +1。用来确认手机上打开的到底是不是新版 ——
 // iOS 把网页加到主屏后会缓存 HTML，光看界面分不出新旧。
-const APP_VER='v2026.09.01-3';
+const APP_VER='v2026.09.01-4';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -1093,6 +1093,25 @@ function computeTotals(){
   ORDER.forEach(k=>{ grand+=classTotal[k]; });
 }
 
+// 年化收益率：按金额加权平均。目前只有储蓄和国债有明确的票面利率
+// （股票是市值波动、现金无息、HSA 的 10% 是自设的预估，都不适合放这里）。
+function classYield(k){
+  if(k!=='cd' && k!=='bond') return null;
+  const g=DATA[k].groups[0];
+  const hs=(g&&g.holdings)||[];
+  let weighted=0, total=0;
+  hs.forEach(function(h){
+    const mv=parseFloat(h.mv)||0, r=parseFloat(h.rate)||0;
+    if(mv>0 && r>0){ weighted+=mv*r; total+=mv; }
+  });
+  return total>0 ? weighted/total : null;
+}
+function yieldTag(k){
+  const y=classYield(k);
+  if(y==null) return '';
+  return '<span style="color:var(--pos);font-weight:600">+'+y.toFixed(1)+'%</span>';
+}
+
 function buildCard(listEl, k, counted, isLast, safeGrand){
   const c=DATA[k], t=classTotal[k];
   const card=document.createElement('div');
@@ -1104,7 +1123,10 @@ function buildCard(listEl, k, counted, isLast, safeGrand){
     ? '<div class="mv">$'+fmt(t)+'</div><div class="pc">'+(t/safeGrand*100).toFixed(1)+'%</div>'
     : '<div class="mv">$'+fmt(t)+'</div><div class="pc" style="color:var(--'+k+')">税优</div>';
   card.innerHTML='<span class="cbar" style="background:'+c.color+'"></span>'+
-    '<div class="mid"><div class="nm">'+c.name+'</div>'+(c.meta?'<div class="meta">'+c.meta+'</div>':'')+'</div>'+
+    '<div class="mid"><div class="nm">'+c.name+'</div>'+
+      (function(){ const y=yieldTag(k);
+        const line=[c.meta||'', y].filter(Boolean).join(' · ');
+        return line?('<div class="meta">'+line+'</div>'):''; })()+'</div>'+
     '<div class="amt">'+right+'</div>'+
     '<span class="chev" style="color:'+c.color+'">&rsaquo;</span>';
   if(isLast){
