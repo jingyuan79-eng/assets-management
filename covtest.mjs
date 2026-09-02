@@ -796,3 +796,72 @@ console.log('\n— 配置写入失败要报出来 —');
   ok('固定支出写入失败也报错', b.alerts.some(m=>/保存失败/.test(m)), b.alerts.join('|'));
   ok('报错里点名「固定支出」', b.alerts.some(m=>/固定支出/.test(m)));
 }
+
+// ══════════════ 十四、配置丢失后重输，不能重复记账 ══════════════
+// 去重 key 是 fix:<配置id>:<日期>。配置 id 原来用 Date.now()，
+// 一旦 localStorage 被清（例如重新 add to home screen），重输就换了 id，
+// 于是 60 天补记窗口内已经记过的账会被当成新账再记一遍 —— 直接多扣一笔。
+console.log('\n— 重输配置不产生重复记账 —');
+{
+  const pastStart=fmt(daysAgo(29));          // 一个月前，已经记过、且仍在 60 天窗口内
+  function app(seedLedger){
+    const calls=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+          if(a){ const p=Object.fromEntries(url.searchParams); calls.push(p);
+            // 假后端照真后端的规矩：key 撞了就 skipped
+            const dup=seedLedger.some(r=>r.key===p.key);
+            return Promise.resolve({json:async()=>({status:dup?'skipped':'success',row:9})}); }
+          return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},
+            ledger:seedLedger, monthly:{}, ledgerMonths:[],
+            cash:{balance:0,hasAnchor:false}, savings:[], bond:[], notices:[],
+            hsa:{cash:0,investment:0,rate:0.1,floor:2000,sweep:'biweekly',ready:true},
+            retire:[], serverDate:fmt(daysAgo(0))})}); };
+        w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, calls};
+  }
+  // 第一次输入：拿到 id
+  let a=app([]); await wait(400);
+  a.w.openDetail('cash'); a.w.switchCashTab('ex'); a.w.openExpenseDrill('Bill & utilities');
+  a.w.showFixedForm('Bill & utilities');
+  a.w.document.getElementById('fx-name').value='房贷月供';
+  a.w.document.getElementById('fx-amt').value='2625.84';
+  a.w.document.getElementById('fx-freq').value='monthly';
+  a.w.document.getElementById('fx-start').value=pastStart;
+  a.w.saveFixed_('Bill & utilities'); await wait(500);
+  const id1=JSON.parse(a.w.localStorage.getItem('fixedExpenses_v1'))[0].id;
+  const key1=a.calls.filter(c=>c.action==='autoLedger').map(c=>c.key)[0];
+  ok('首次输入产生了记账', !!key1, key1);
+
+  // 模拟配置丢失（全新 localStorage）后原样重输，且这笔已经在 Ledger 里
+  const already=[{row:2,date:pastStart,category:'Bill & utilities',
+                  amount:2625.84,note:'房贷月供（固定）',key:key1}];
+  let b=app(already); await wait(400);
+  b.w.openDetail('cash'); b.w.switchCashTab('ex'); b.w.openExpenseDrill('Bill & utilities');
+  b.w.showFixedForm('Bill & utilities');
+  b.w.document.getElementById('fx-name').value='房贷月供';
+  b.w.document.getElementById('fx-amt').value='2625.84';
+  b.w.document.getElementById('fx-freq').value='monthly';
+  b.w.document.getElementById('fx-start').value=pastStart;
+  b.w.saveFixed_('Bill & utilities'); await wait(500);
+  const id2=JSON.parse(b.w.localStorage.getItem('fixedExpenses_v1'))[0].id;
+  ok('重输后 id 不变（由内容派生，不是时间戳）', id1===id2, `${id1} vs ${id2}`);
+  const resent=b.calls.filter(c=>c.action==='autoLedger' && c.key===key1);
+  ok('重输不会用新 key 再记一遍',
+     b.calls.filter(c=>c.action==='autoLedger').every(c=>c.key===key1),
+     b.calls.filter(c=>c.action==='autoLedger').map(c=>c.key).join(','));
+  ok('即便重发，服务器也按同一个 key 挡掉', resent.length<=1);
+  ok('id 里不含时间戳', !/^f\d{13}$/.test(id2), id2);
+
+  // 同分类同名建两笔，id 不能撞
+  b.w.showFixedForm('Bill & utilities');
+  b.w.document.getElementById('fx-name').value='房贷月供';
+  b.w.document.getElementById('fx-amt').value='100';
+  b.w.document.getElementById('fx-start').value=fmt(daysAgo(0));
+  b.w.saveFixed_('Bill & utilities'); await wait(300);
+  const list=JSON.parse(b.w.localStorage.getItem('fixedExpenses_v1'));
+  ok('同名第二笔另给 id，不覆盖第一笔',
+     list.length===2 && list[0].id!==list[1].id, list.map(x=>x.id).join(','));
+}

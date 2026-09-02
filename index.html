@@ -189,6 +189,7 @@
   <div id="propslot"></div>
   <div class="foot">
     <div class="badge" id="syncBadge">同步中…</div><br>
+    <div id="appVer" style="text-align:center;font-size:10px;color:var(--ink-faint);margin-top:6px"></div>
     点击任意大类查看明细 · 点右上角日期可手动重新同步
   </div>
 </div>
@@ -335,6 +336,17 @@ function persistCfg(key, val, label){
     return false;
   }
 }
+// 固定支出 / 定期转账的 id 决定去重 key（fix:<id>:<日期>）。
+// 原来用 Date.now()：配置一旦丢失（比如重新 add to home screen，
+// localStorage 是全新的），重输就会换一个 id，于是 60 天补记窗口内
+// 已经记过的账会被当成新账再记一遍 —— 直接多扣一笔。
+// 改成由内容派生：重输同一笔，key 不变，服务器按 key 挡掉重复。
+function stableId(prefix, parts){
+  const raw=parts.join('|').toLowerCase().replace(/\s+/g,'');
+  let h=0;
+  for(let i=0;i<raw.length;i++){ h=(h*31+raw.charCodeAt(i))|0; }
+  return prefix+(h>>>0).toString(36);
+}
 function cleanLegacyKeys(){
   ['assetAdditions','cdList','bondList','bondList_v2','cdList_v3','cashList_v1',
    'expenseDeducted_v1','expenseDeducted_v2'].forEach(function(k){
@@ -371,6 +383,10 @@ function persistSimple(cls, key){ localStorage.setItem(key, JSON.stringify(DATA[
 
 
 cleanLegacyKeys(); loadStock();
+
+// 版本号：改完代码顺手 +1。用来确认手机上打开的到底是不是新版 ——
+// iOS 把网页加到主屏后会缓存 HTML，光看界面分不出新旧。
+const APP_VER='v2026.09.01-3';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -819,7 +835,10 @@ function saveFixed_(cat){
     const it=list.find(function(x){ return x.id===editingFixedId; });
     if(it){ it.name=name; it.amount=Math.round(amt*100)/100; it.freq=freq; it.start=start; }
   }else{
-    list.push({id:'f'+Date.now(), name:name, amount:Math.round(amt*100)/100,
+    // 同分类同名视为同一笔；真要建两笔同名的，加个序号区分
+    let fid=stableId('f',[cat,name]), n=1;
+    while(list.some(function(x){ return x.id===fid; })) fid=stableId('f',[cat,name,++n]);
+    list.push({id:fid, name:name, amount:Math.round(amt*100)/100,
                category:cat, freq:freq, start:start, enabled:true});
   }
   if(!saveFixed(list)) return;
@@ -1164,6 +1183,7 @@ function renderOverview(){
   computeTotals();
   const safeGrand = grand>0 ? grand : 1;
   document.getElementById('asof').textContent=ASOF;
+  const vEl=document.getElementById('appVer'); if(vEl) vEl.textContent=APP_VER;
   document.getElementById('total').textContent=fmt(grand);
 
   const bar=document.getElementById('allocbar'); bar.innerHTML='';
@@ -2333,7 +2353,7 @@ function migrateRecurring(r){
 }
 // 每次自动转账带一个唯一 key，即使本地执行状态丢失也不会重复转
 function xferKey(r, d){
-  if(!r.id){ r.id='x'+Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
+  if(!r.id){ r.id=stableId('x',[r.src,r.tgt,r.amt,r.freq,r.start]); }
   return 'xfer:'+r.id+':'+fmtD(d);
 }
 function runRecurring(){
