@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  v9  (2026-08-30)
+ * 资产驾驶舱 · Google Apps Script 后端  v10 (2026-09-01)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -7,6 +7,16 @@
  * 时区：America/Phoenix（Arizona 不用夏令时）
  *
  * ── 改动记录（每次改代码请在最上方补一条，旧条目保留）──────────────
+ *
+ * v10 2026-09-01  设置搬进 Sheet（Config 表）
+ *   · 新增 Config 表（脚本自建）：A:key  B:value(JSON)
+ *   · 新增 action saveConfig：一次写一个键
+ *   · readAll 返回 config 字段
+ *   · 背景：固定支出 / Payroll / 定期转账 / HSA 供款 / 401k / 房贷
+ *     原本只存手机的 localStorage。iOS 重新 add to home screen 会开一个
+ *     全新的存储容器，清网站数据、换设备同理 —— 设置全丢且没有备份。
+ *     现在以 Sheet 为准：保存时同时写本地（立即生效）和 Sheet（持久），
+ *     同步时从 Sheet 取回；Sheet 上还没有的会自动上传做一次迁移
  *
  * v9  2026-08-30  HSA 自动补仓频率
  *   · HSA 表新增 F:Sweep 列（Cash 行），可选 biweekly / monthly / quarterly，
@@ -156,6 +166,7 @@ function handleActionInner(data) {
     case "deleteSaving": return deleteSaving(ss, data);
     case "dismissNotice":return dismissNotice(ss, data);
     case "updateHsa":    return updateHsa(ss, data);
+    case "saveConfig":   return saveConfig(ss, data);
 
     case "updateStock": return updateStock(ss, data);
     case "addStock":    return addStock(ss, data);
@@ -1060,6 +1071,56 @@ function updateHsa(ss, data) {
   return { status: "success", type: "updateHsa", hsa: safeRun(function () { return runHsa(ss); }, null) };
 }
 
+// ==================== Config（小程序的设置）====================
+// A:key  B:value(JSON)
+// 固定支出、Payroll、定期转账、HSA 供款、401k、房贷这些「设置类」数据，
+// 以前只存在手机的 localStorage 里。iOS 重新 add to home screen 会开一个
+// 全新的存储容器，清网站数据、换设备同理 —— 设置就全没了，而且没有备份。
+// 现在以 Sheet 为准：读取时下发，保存时同时写本地（立即生效）和这里（持久）。
+function configSheet(ss) {
+  var sh = ss.getSheetByName("Config");
+  if (!sh) {
+    sh = ss.insertSheet("Config");
+    sh.getRange(1, 1, 1, 2).setValues([["key", "value"]]);
+  }
+  return sh;
+}
+
+function readConfig(ss) {
+  var sh = ss.getSheetByName("Config");
+  if (!sh || sh.getLastRow() < 2) return {};
+  var v = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues();
+  var out = {};
+  for (var i = 0; i < v.length; i++) {
+    var k = (v[i][0] || "").toString().trim();
+    if (!k) continue;
+    var raw = (v[i][1] || "").toString();
+    if (!raw) continue;
+    try { out[k] = JSON.parse(raw); }
+    catch (e) { Logger.log("Config 解析失败: " + k); }   // 坏行跳过，不拖垮整次读取
+  }
+  return out;
+}
+
+// 一次写一个键。value 传 JSON 字符串。
+function saveConfig(ss, data) {
+  var key = (data.key || "").toString().trim();
+  if (!key) return { status: "error", message: "saveConfig 缺少 key" };
+  var raw = (data.value == null) ? "" : data.value.toString();
+  var sh = configSheet(ss);
+  var last = sh.getLastRow();
+  var row = -1;
+  if (last > 1) {
+    var keys = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (var i = 0; i < keys.length; i++) {
+      if ((keys[i][0] || "").toString().trim() === key) { row = i + 2; break; }
+    }
+  }
+  if (row < 0) sh.appendRow([key, raw]);
+  else sh.getRange(row, 1, 1, 2).setValues([[key, raw]]);
+  return { status: "success", type: "saveConfig", key: key };
+}
+
 // ==================== 通知（自动发生的事）====================
 function noticeSheet(ss) {
   var sh = ss.getSheetByName("Notices");
@@ -1287,6 +1348,7 @@ function readAllInner(force) {
            notices: safeRun(function () { return readNotices(ss); }, []),
            bond: safeRun(function () { return runBonds(ss, bs); }, []),
            hsa: safeRun(function () { return runHsa(ss, lv); }, null),
+           config: safeRun(function () { return readConfig(ss); }, {}),
            retire: readTab(ss, "Retire"),
            serverDate: Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd") };
 }

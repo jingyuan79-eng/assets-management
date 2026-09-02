@@ -326,15 +326,37 @@ const SYM_DESC = {
 // 清掉历史遗留的键（储蓄已迁到 Sheet，不再本地存）
 // 配置写入 localStorage。失败必须让人看见 —— 静默失败的表现就是
 // 「点了保存像没保存上」，下次打开配置也不见了，很难查。
+// 需要备份到 Sheet 的「设置类」数据。localStorage 只是本地快取，
+// Sheet 才是真相源 —— iOS 重新 add to home screen 会开一个全新的存储容器，
+// 清网站数据、换设备同理，只存本地等于没有备份。
+const CFG_KEYS=['fixedExpenses_v1','incomeConfig_v1','recurringTransfers_v1',
+                'hsaConfig_v1','k401_v1','property_v1'];
 function persistCfg(key, val, label){
-  try{ localStorage.setItem(key, JSON.stringify(val)); return true; }
-  catch(e){
-    console.log('配置写入失败', key, e);
-    alert('保存失败：浏览器不让写入本地存储。\n'+
-          (label?('「'+label+'」的设置没有保存。\n'):'')+
-          '常见原因是隐私模式，或存储空间已满。');
-    return false;
+  const json=JSON.stringify(val);
+  let localOk=true;
+  try{ localStorage.setItem(key, json); }
+  catch(e){ localOk=false; console.log('本地写入失败', key, e); }
+  // 无论本地成没成，都要往 Sheet 备份一份
+  if(CFG_KEYS.indexOf(key)>=0) apiWrite({action:'saveConfig', key:key, value:json});
+  if(!localOk){
+    alert('本地保存失败（可能是隐私模式或存储已满）。\n'+
+          (label ? ('「'+label+'」') : '该设置')+'已备份到 Sheet，下次同步会自动取回。');
   }
+  return true;   // 已经写进 Sheet，就算本地失败也不该中断后续流程
+}
+// 同步时：Sheet 上有的以 Sheet 为准写回本地；Sheet 上没有、本地却有的，
+// 说明是这次改动之前留下的，顺手上传做一次迁移。
+function syncConfigFromSheet(cfg){
+  cfg=cfg||{};
+  CFG_KEYS.forEach(function(k){
+    if(Object.prototype.hasOwnProperty.call(cfg,k) && cfg[k]!=null){
+      try{ localStorage.setItem(k, JSON.stringify(cfg[k])); }catch(e){}
+    }else{
+      let local=null;
+      try{ local=localStorage.getItem(k); }catch(e){}
+      if(local) apiWrite({action:'saveConfig', key:k, value:local});
+    }
+  });
 }
 // 固定支出 / 定期转账的 id 决定去重 key（fix:<id>:<日期>）。
 // 原来用 Date.now()：配置一旦丢失（比如重新 add to home screen，
@@ -386,7 +408,7 @@ cleanLegacyKeys(); loadStock();
 
 // 版本号：改完代码顺手 +1。用来确认手机上打开的到底是不是新版 ——
 // iOS 把网页加到主屏后会缓存 HTML，光看界面分不出新旧。
-const APP_VER='v2026.09.01-4';
+const APP_VER='v2026.09.01-5';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -571,6 +593,7 @@ function syncStockFromSheet(){
       rebuildHsa(data.hsa);
       notices = data.notices || [];
       syncOk = true;
+      syncConfigFromSheet(data.config);   // 设置以 Sheet 为准，先落到本地再往下走
       cacheTs = 0;                // 拿到新数据，屏幕上不再是缓存
       if(data.serverDate) ASOF = data.serverDate;   // 服务器日期，不受本机时区影响
       saveSheetCache(data);       // 供下次打开垫底

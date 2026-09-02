@@ -568,7 +568,9 @@ console.log('\n— HSA 输入路径 —');
 
   // ① 打开 App：供款已全部记过 → 一次写请求都不该发
   let a=app(seeded, CFG); await wait(500);
-  ok('打开 App 不重发已记过的供款', a.calls.length===0, `发了 ${a.calls.length} 次`);
+  // 打开时可能有 saveConfig（把本地配置备份到 Sheet），这里只关心补记去重
+  const autoOnOpen=a.calls.filter(c=>c.action==='autoLedger');
+  ok('打开 App 不重发已记过的供款', autoOnOpen.length===0, `发了 ${autoOnOpen.length} 次`);
 
   // ② 补记窗口必须落在后端 70 天明细之内，否则去重查不到、每次都白跑
   const dues=JSON.parse(a.w.eval("JSON.stringify(hsaPayDatesDue(loadHsaCfg()))"));
@@ -783,7 +785,12 @@ console.log('\n— 配置写入失败要报出来 —');
   b.w.savePayroll(); await wait(300);
   ok('写入失败时明确报错，不静默', b.alerts.some(m=>/保存失败/.test(m)), b.alerts.join('|'));
   ok('报错里点名是哪项设置', b.alerts.some(m=>/Payroll/.test(m)));
-  ok('配置没存上就不发补记请求', b.calls.length===nBefore, `多发了 ${b.calls.length-nBefore} 次`);
+  // 本地写失败不再中断：设置已经备份进 Sheet，流程该照常走完
+  // 注意这一节的假 fetch 记的是 action 字符串，不是对象
+  ok('本地失败时仍把设置备份到 Sheet',
+     b.calls.includes('saveConfig'), b.calls.join(','));
+  ok('备份成功后流程照常走完（不再因本地失败而中断）',
+     b.calls.length>nBefore, `${b.calls.length-nBefore} 次请求`);
 
   // 固定支出同理
   b.w.openDetail('cash'); b.w.switchCashTab('ex'); b.w.openExpenseDrill('Bill & utilities');
@@ -956,4 +963,78 @@ console.log('\n— 新增账户后收益率自动更新 —');
   w.saveCd(); await wait(600);
   ok('新增账户后自动重算为 4.2%', /\+4\.2%/.test(meta()), meta());
   ok('总额也跟着变', w.eval("classTotal.cd")===60000, '$'+w.eval("classTotal.cd"));
+}
+
+// ══════════════ 十六、设置备份到 Sheet ══════════════
+// 固定支出 / Payroll / 定期转账 / HSA 供款 / 401k / 房贷 原本只存 localStorage。
+// iOS 重新 add to home screen 会开一个全新的存储容器，设置就全没了且无备份。
+// 现在以 Sheet 的 Config 表为准：保存时同时写本地和 Sheet，同步时取回。
+console.log('\n— 设置备份到 Sheet —');
+{
+  function app(serverCfg, seedLocal, breakLocal){
+    const calls=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        if(seedLocal) Object.keys(seedLocal).forEach(k=>w.localStorage.setItem(k,seedLocal[k]));
+        if(breakLocal){
+          const box=Object.assign({}, seedLocal||{});
+          Object.defineProperty(w,'localStorage',{configurable:true,get:()=>({
+            getItem:(k)=>(k in box?box[k]:null),
+            setItem:()=>{ throw new Error('QuotaExceededError'); },
+            removeItem:(k)=>{ delete box[k]; }, clear:()=>{},
+            key:(i)=>Object.keys(box)[i]??null, get length(){return Object.keys(box).length;} })});
+        }
+        w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+          if(a){ calls.push(Object.fromEntries(url.searchParams));
+                 return Promise.resolve({json:async()=>({status:'success',row:9})}); }
+          return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+            monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},savings:[],bond:[],
+            notices:[],hsa:null,retire:[],config:serverCfg||{},serverDate:'2026-09-01'})}); };
+        w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, calls};
+  }
+
+  // ① 全新设备（localStorage 空）+ Sheet 上有配置 → 取回来
+  const PAY={payroll:{amount:3634,start:'2026-08-07',freq:'biweekly'}};
+  const FIX=[{id:'fabc',name:'房贷月供',amount:2625.84,category:'Bill & utilities',
+              freq:'monthly',start:'2026-08-03',enabled:true}];
+  let a=app({incomeConfig_v1:PAY, fixedExpenses_v1:FIX}); await wait(600);
+  ok('空设备能从 Sheet 取回 Payroll', a.w.eval("(loadIncome().payroll||{}).amount")===3634);
+  ok('空设备能从 Sheet 取回固定支出', a.w.eval("loadFixed().length")===1);
+  a.w.openDetail('cash');
+  ok('界面直接显示「已设」，不需要重输',
+     /已设/.test(a.w.document.getElementById('cashTabBody').textContent),
+     a.w.document.getElementById('cashTabBody').textContent.slice(0,36));
+
+  // ② 保存时要同时写 Sheet
+  let b=app({}); await wait(600);
+  b.w.openDetail('cash'); b.w.showPayrollForm();
+  b.w.document.getElementById('pay-amt').value='3634';
+  b.w.document.getElementById('pay-start').value='2026-08-07';
+  b.w.savePayroll(); await wait(500);
+  const wrote=b.calls.filter(c=>c.action==='saveConfig' && c.key==='incomeConfig_v1');
+  ok('保存 Payroll 会写一份到 Sheet', wrote.length>0, `${wrote.length} 次`);
+  ok('写进 Sheet 的内容正确',
+     wrote.length>0 && JSON.parse(wrote[wrote.length-1].value).payroll.amount===3634,
+     wrote.length?wrote[wrote.length-1].value:'');
+
+  // ③ 迁移：Sheet 上没有、本地有 → 自动上传
+  let c=app({}, {fixedExpenses_v1:JSON.stringify(FIX)}); await wait(600);
+  const up=c.calls.filter(x=>x.action==='saveConfig' && x.key==='fixedExpenses_v1');
+  ok('本地已有但 Sheet 没有的，自动上传备份', up.length>0, `${up.length} 次`);
+
+  // ④ Sheet 上有就以 Sheet 为准，不再重复上传
+  let e=app({fixedExpenses_v1:FIX}, {fixedExpenses_v1:JSON.stringify(FIX)}); await wait(600);
+  ok('Sheet 已有则不重复上传',
+     e.calls.filter(x=>x.action==='saveConfig' && x.key==='fixedExpenses_v1').length===0);
+
+  // ⑤ 本地写不进去（隐私模式）也要备份到 Sheet
+  let f=app({}, {}, true); await wait(600);
+  f.w.openDetail('cash'); f.w.showPayrollForm();
+  f.w.document.getElementById('pay-amt').value='3634';
+  f.w.document.getElementById('pay-start').value='2026-08-07';
+  f.w.savePayroll(); await wait(500);
+  ok('本地写入失败时仍备份到 Sheet',
+     f.calls.some(x=>x.action==='saveConfig' && x.key==='incomeConfig_v1'));
 }
