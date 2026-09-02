@@ -924,3 +924,36 @@ console.log('\n— 总览卡片的年化收益率 —');
   ok('没有账户时不显示 +NaN%', !/NaN/.test(dom2.window.document.body.innerHTML));
   ok('没有账户时收益率为 null', dom2.window.eval("classYield('cd')")===null);
 }
+
+// 新增账户后收益率要跟着变（不是一次性算完就定死）
+console.log('\n— 新增账户后收益率自动更新 —');
+{
+  let SAV=[{id:'s1',name:'CD-A',type:'CD',balance:30000,rate:0.04,lastPost:'2026-08-01',
+            nextUpdate:'',maturity:'2027-06-30',status:'active'},
+           {id:'s2',name:'OS-B',type:'OS',balance:10000,rate:0.03,lastPost:'2026-08-01',
+            nextUpdate:'',maturity:'',status:'active'}];
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+        const p=Object.fromEntries(url.searchParams);
+        if(a==='addSaving'){ SAV.push({id:'sN',name:p.name,type:p.type,balance:+p.balance,
+          rate:+p.rate/100,lastPost:'2026-09-01',nextUpdate:'',maturity:p.maturity||'',status:'active'});
+          return Promise.resolve({json:async()=>({status:'success',savings:JSON.parse(JSON.stringify(SAV))})}); }
+        if(a) return Promise.resolve({json:async()=>({status:'success'})});
+        return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+          monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},
+          savings:JSON.parse(JSON.stringify(SAV)),bond:[],notices:[],hsa:null,
+          retire:[],serverDate:'2026-09-01'})}); };
+        w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window, d=w.document; await wait();
+  const meta=()=>{ let r=''; [].forEach.call(d.querySelectorAll('.ccard'),c=>{
+    if((c.querySelector('.nm')||{}).textContent==='储蓄') r=(c.querySelector('.meta')||{}).textContent; }); return r; };
+  ok('初始 = (30000×4 + 10000×3)/40000 = 3.8%', /\+3\.8%/.test(meta()), meta());
+  w.openDetail('cd'); w.showCdForm();
+  d.getElementById('f-name').value='CD-NEW'; d.getElementById('f-mv').value='20000';
+  d.getElementById('f-rate').value='5'; d.getElementById('f-type').value='CD';
+  w.saveCd(); await wait(600);
+  ok('新增账户后自动重算为 4.2%', /\+4\.2%/.test(meta()), meta());
+  ok('总额也跟着变', w.eval("classTotal.cd")===60000, '$'+w.eval("classTotal.cd"));
+}
