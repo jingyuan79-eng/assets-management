@@ -2784,8 +2784,12 @@ function savePayroll(){
   cfg.payroll={amount:Math.round(amt), start:start, freq:freq};
   delete cfg.paidTotal; delete cfg.lastPayDate;   // 旧版遗留字段，不再需要
   saveIncome(cfg);
+  // 先把配置显示出来，历史工资的补记放后台跑完再刷一次。
+  // 补记可能有好几个发薪日，每笔一次 Apps Script 往返（1~3 秒），
+  // 挡在渲染前面会让「保存」看起来没生效、依旧显示「未设置」。
+  openDetail('cash', true);
   // 每个发薪日都是 Ledger 里的一行，带 pay:日期 的 key，重复写入会被服务器拦掉
-  runPayroll().then(function(){ openDetail('cash', true); });
+  runPayroll().then(function(){ recompute(); openDetail('cash', true); });
 }
 function showBonusForm(){
   document.getElementById('incomeFormWrap').innerHTML=

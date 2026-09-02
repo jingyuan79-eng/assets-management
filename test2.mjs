@@ -43,8 +43,15 @@ global.fetch = async (url) => {
   return {json:async()=>({status:'success'})};
 };
 
+const NOW=new Date('2026-08-23T00:00:00Z');
 const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
-  beforeParse(w){ w.fetch=global.fetch; w.alert=m=>console.log('   [alert]',m);
+  beforeParse(w){
+    // jsdom 的 window 有自己的 Date，外面冻结 globalThis.Date 管不到它。
+    // 不冻的话前端读的是真实系统时间，一跨月夹具里写死的日期就全部失效。
+    const _RD=w.Date;
+    w.Date=class extends _RD{constructor(...a){if(a.length===0)super(NOW.getTime());else super(...a);}
+      static now(){return NOW.getTime();}};
+    w.fetch=global.fetch; w.alert=m=>console.log('   [alert]',m);
     w.confirm=()=>true; w.scrollTo=()=>{}; w.Element.prototype.scrollIntoView=function(){}; }});
 const w=dom.window,d=dom.window.document;
 const wait=(ms=250)=>new Promise(r=>setTimeout(r,ms));

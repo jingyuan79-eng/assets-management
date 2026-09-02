@@ -66,6 +66,11 @@ const backend=new Function('return (function(){'+gs+'\nreturn {doGet,doPost};})(
 
 const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
   beforeParse(w){ w.localStorage.clear();
+    // jsdom 的 window 有自己的 Date，外面冻结 globalThis.Date 管不到它。
+    // 不冻的话前端读的是真实系统时间，一跨月夹具里写死的日期就全部失效。
+    const _RD=w.Date;
+    w.Date=class extends _RD{constructor(...a){if(a.length===0)super(NOW.getTime());else super(...a);}
+      static now(){return NOW.getTime();}};
     w.fetch=async(u)=>{const url=new URL(u);const p={};url.searchParams.forEach((v,k)=>p[k]=v);
       return {json:async()=>JSON.parse(backend.doGet({parameter:p.action?p:{}}).getContent())};};
     w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};

@@ -506,7 +506,7 @@ console.log('\n— HSA 页的固定支出 —');
   d.getElementById('fx-name').value='每月理疗';
   d.getElementById('fx-amt').value='120';
   d.getElementById('fx-freq').value='monthly';
-  d.getElementById('fx-start').value=`${ym}-10`;
+  d.getElementById('fx-start').value=fmt(daysAgo(0));   // 用今天，保证一定已到期
   w.saveFixed_('HSA · 医疗');
   await wait();
 
@@ -652,4 +652,79 @@ console.log('\n— 自动补仓频率 —');
      (bi.cash+bi.investment)>PRIN,
      `多 $${((bi.cash+bi.investment)-PRIN).toFixed(2)}`);
   ok('留空时默认每两周（保持原行为）', withFreq('').sweep==='biweekly');
+}
+
+// ══════════════ 十二、保存配置后界面必须立刻更新 ══════════════
+// 现金页 Payroll 曾把 openDetail 排在 runPayroll 之后：点了保存，界面依旧
+// 显示「未设置」，要等好几次 Apps Script 往返才变 —— 看起来像没保存成功。
+// 跨月场景一并盯住：上个月设的配置，进入新月份后不能消失。
+console.log('\n— 保存配置后立刻生效 / 跨月保留 —');
+{
+  function app(slow){
+    const calls=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        w.fetch=(u)=>{ const a=new URL(u).searchParams.get('action');
+          if(a){ calls.push(a);
+            return new Promise(r=>setTimeout(()=>r({json:async()=>({status:'success',row:9})}),slow)); }
+          return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+            monthly:{},ledgerMonths:['2026-09','2026-08'],
+            cash:{balance:5000,anchorDate:'2026-08-01',anchorAmount:5000,hasAnchor:true,bookStart:'2026-08-01'},
+            savings:[],bond:[],notices:[],
+            hsa:{cash:2000,investment:5000,rate:0.1,floor:2000,sweep:'biweekly',ready:true},
+            retire:[],serverDate:'2026-09-01'})}); };
+        w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, calls};
+  }
+  const {w,calls}=app(300); await wait(600);
+  const d=w.document;
+  w.openDetail('cash'); w.showPayrollForm();
+  d.getElementById('pay-amt').value='2600';
+  d.getElementById('pay-freq').value='biweekly';
+  d.getElementById('pay-start').value='2026-08-07';
+  w.savePayroll();
+  ok('Payroll 保存后立刻显示「已设」（不等写请求）',
+     /已设/.test(d.getElementById('cashTabBody').textContent),
+     d.getElementById('cashTabBody').textContent.slice(0,40));
+  ok('此刻补记的写请求还没回来', calls.length===0, `已完成 ${calls.length} 次`);
+  ok('配置确实写进了 localStorage', !!w.localStorage.getItem('incomeConfig_v1'));
+  await wait(1800);
+  ok('后台补记跑完后仍显示「已设」',
+     /已设/.test(d.getElementById('cashTabBody').textContent));
+
+  // 跨月：8 月设的配置，9/01 打开后必须还在
+  const CFG={payroll:{amount:2600,start:'2026-08-07',freq:'biweekly'}};
+  const FIX=[{id:'f1',name:'网费',amount:70,category:'Bill & utilities',
+              freq:'monthly',start:'2026-08-05',enabled:true}];
+  const HCFG={employee:250,employer:100,freq:'biweekly',start:'2026-08-07'};
+  const dom2=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w2){ w2.localStorage.clear();
+      w2.localStorage.setItem('incomeConfig_v1',JSON.stringify(CFG));
+      w2.localStorage.setItem('fixedExpenses_v1',JSON.stringify(FIX));
+      w2.localStorage.setItem('hsaConfig_v1',JSON.stringify(HCFG));
+      w2.fetch=(u)=>{ const a=new URL(u).searchParams.get('action');
+        if(a) return Promise.resolve({json:async()=>({status:'success',row:9})});
+        return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+          monthly:{},ledgerMonths:['2026-09','2026-08'],
+          cash:{balance:5000,anchorDate:'2026-08-01',anchorAmount:5000,hasAnchor:true,bookStart:'2026-08-01'},
+          savings:[],bond:[],notices:[],
+          hsa:{cash:2000,investment:5000,rate:0.1,floor:2000,sweep:'biweekly',ready:true},
+          retire:[],serverDate:'2026-09-01'})}); };
+      w2.alert=()=>{}; w2.confirm=()=>true; w2.scrollTo=()=>{};
+      w2.Element.prototype.scrollIntoView=function(){}; }});
+  const v=dom2.window, dd=v.document; await wait(600);
+  ok('跨月后 Payroll 配置仍在', !!v.localStorage.getItem('incomeConfig_v1'));
+  ok('跨月后固定支出配置仍在', v.eval("loadFixed().length")===1);
+  ok('跨月后 HSA 供款配置仍在', v.eval("(loadHsaCfg().employee||0)")===250);
+  v.openDetail('cash');
+  ok('新月份里 Payroll 仍显示「已设」，不是「未设置」',
+     /已设/.test(dd.getElementById('cashTabBody').textContent),
+     dd.getElementById('cashTabBody').textContent.slice(0,40));
+  v.switchCashTab('ex'); v.openExpenseDrill('Bill & utilities');
+  ok('新月份里固定支出条目仍列出（金额归零是正常的）',
+     /网费/.test(dd.getElementById('cashTabBody').textContent));
+  v.openDetail('hsa'); v.switchHsaTab('in');
+  ok('新月份里 HSA Contribution 仍显示「已设」',
+     /已设/.test(dd.getElementById('hsaTabBody').textContent));
 }
