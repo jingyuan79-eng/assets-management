@@ -290,11 +290,23 @@ function persistProp(){
 // 服务器算好的房产参数覆盖本地。只覆盖真的有值的字段，
 // Sheet 上某一格留空时不要把本地的数清掉。
 function rebuildProperty(info){
-  if(!info) return;
+  // Sheet 上还没填 → 把本地这份传上去，完成一次性迁移
+  if(!info || !info.value){
+    if(PROPERTY.value) apiWrite(Object.assign({action:'saveProperty'}, PROPERTY));
+    return;
+  }
   Object.keys(info).forEach(function(k){
     if(info[k]!=null && info[k]!=='') PROPERTY[k]=info[k];
   });
   try{ localStorage.setItem('property_v1', JSON.stringify(PROPERTY)); }catch(e){}
+}
+
+// ---- 方案 B：固定支出里的房贷金额跟随房产模块 ----
+// 勾了 linkProp 的那条固定支出，金额取「标准月供 + 每月额外还本」，
+// 不用存死数字。你在房产页调额外还本，下一期自动跟着变。
+function fixedAmount(it){
+  if(it && it.linkProp) return Math.round((PROPERTY.payment||0)+(PROPERTY.extra||0));
+  return (it&&it.amount)||0;
 }
 
 const ORDER = ['stock','cd','bond','hsa','cash'];
@@ -422,7 +434,7 @@ cleanLegacyKeys(); loadStock();
 
 // 版本号：改完代码顺手 +1。用来确认手机上打开的到底是不是新版 ——
 // iOS 把网页加到主屏后会缓存 HTML，光看界面分不出新旧。
-const APP_VER='v2026.09.01-6';
+const APP_VER='v2026.09.01-7';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -763,7 +775,7 @@ function runFixedExpensesInner(){
     dueDates(it).forEach(function(ds){
       const key='fix:'+it.id+':'+ds;
       if(ledgerHasKey(key)) return;
-      jobs.push({item:it, date:ds, key:key});
+      jobs.push({item:it, date:ds, key:key, amount:fixedAmount(it)});
     });
   });
   if(!jobs.length) return Promise.resolve();
@@ -771,16 +783,16 @@ function runFixedExpensesInner(){
   jobs.forEach(function(j){
     chain=chain.then(function(){
       return apiWrite({action:'autoLedger', key:j.key, date:j.date,
-                       category:j.item.category, amount:j.item.amount,
+                       category:j.item.category, amount:j.amount,
                        note:j.item.name+'（固定）'}).then(function(res){
         if(res && res.status==='success'){
           const nr={row:res.row, date:j.date, category:j.item.category,
-                    amount:j.item.amount, note:j.item.name+'（固定）', key:j.key};
+                    amount:j.amount, note:j.item.name+'（固定）', key:j.key};
           ledgerRows.push(nr); applyCashDelta(signedOf(nr));
         }else if(res && res.status==='skipped'){
           // Sheet 里已存在（多设备场景），本地补一条占位，避免重复判断
           ledgerRows.push({row:res.row, date:j.date, category:j.item.category,
-                           amount:j.item.amount, note:j.item.name+'（固定）', key:j.key});
+                           amount:j.amount, note:j.item.name+'（固定）', key:j.key});
         }
       });
     });
@@ -799,7 +811,7 @@ let editingFixedId=null;
 function renderFixedSection(cat){
   const list=loadFixed().filter(function(x){ return x.category===cat; });
   const monthly=list.filter(x=>x.enabled!==false)
-    .reduce(function(s,x){ return s + (x.amount||0)/(FREQ_MONTHS[x.freq]||1); },0);
+    .reduce(function(s,x){ return s + fixedAmount(x)/(FREQ_MONTHS[x.freq]||1); },0);
   let html='<div style="display:flex;align-items:baseline;margin:18px 2px 8px">'+
     '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">固定支出</div>'+
     '<div class="num" style="font-size:12px;color:var(--ink-faint)">折合每月 $'+fmt(Math.round(monthly))+'</div></div>';
@@ -811,7 +823,8 @@ function renderFixedSection(cat){
         return '<div class="row" style="cursor:pointer;border-color:rgba(0,0,0,.06);'+(off?'opacity:.45':'')+'" onclick="editFixed(\''+x.id+'\')">'+
           '<div class="tk" style="width:auto;flex:1"><div class="sym" style="font-size:13px">'+x.name+(off?' · 已停用':'')+'</div>'+
           '<div class="qty">'+(FREQ_LABEL[x.freq]||'每月')+' · '+(x.start||'').replace(/-/g,'/')+' 起</div></div>'+
-          '<div class="val"><div class="mv">$'+fmt(x.amount)+'</div></div></div>';
+          '<div class="val"><div class="mv">$'+fmt(fixedAmount(x))+'</div>'+
+          (x.linkProp?'<div class="pc" style="color:var(--prop)">跟随房贷</div>':'')+'</div></div>';
       }).join('')+'</div>';
   }
   html+='<div class="addbox" style="border-color:rgba(0,0,0,.12);background:'+(EXP_COLORS[cat]||'var(--hsa-bg)')+'" onclick="showFixedForm(\''+cat.replace(/'/g,"\\'")+'\')">'+
@@ -828,7 +841,15 @@ function fixedFormHtml(v, cat){
   return '<div class="editform" style="border-color:rgba(0,0,0,.12)">'+
     '<div style="font-size:12px;color:var(--ink-faint);margin-bottom:12px">归入 '+cat+'</div>'+
     '<div class="fld"><label>名称</label><input id="fx-name" value="'+(v.name||'')+'" placeholder="例：房贷月供 / 车保险 / 宠物保险" autocomplete="off"></div>'+
-    '<div class="fld"><label>金额 ($)</label><input id="fx-amt" type="number" inputmode="decimal" value="'+(v.amount!=null?v.amount:'')+'" placeholder="例：2025"></div>'+
+    '<div class="fld"><label style="display:flex;align-items:center;gap:6px;cursor:pointer">'+
+      '<input id="fx-link" type="checkbox"'+(v.linkProp?' checked':'')+
+        ' onchange="toggleFixedLink()" style="width:auto;margin:0">'+
+      '<span>金额跟随房贷月供</span></label>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-top:2px">'+
+        '勾上就用房产页的「标准月供 + 每月额外还本」，当前 $'+
+        fmt((PROPERTY.payment||0)+(PROPERTY.extra||0))+'；改额外还本会自动跟着变</div></div>'+
+    '<div class="fld" id="fx-amt-fld"'+(v.linkProp?' style="display:none"':'')+
+      '><label>金额 ($)</label><input id="fx-amt" type="number" inputmode="decimal" value="'+(v.amount!=null?v.amount:'')+'" placeholder="例：2025"></div>'+
     '<div class="fld"><label>频率</label><select id="fx-freq" style="'+st+'">'+
       Object.keys(FREQ_LABEL).map(function(k){ return '<option value="'+k+'"'+(freq===k?' selected':'')+'>'+FREQ_LABEL[k]+'</option>'; }).join('')+
     '</select></div>'+
@@ -843,6 +864,11 @@ function fixedFormHtml(v, cat){
       '<button class="danger" onclick="deleteFixed(\''+v.id+'\')">删除</button>'+
     '</div></div>':'')+
   '</div>';
+}
+function toggleFixedLink(){
+  const on=document.getElementById('fx-link').checked;
+  const fld=document.getElementById('fx-amt-fld');
+  if(fld) fld.style.display = on ? 'none' : '';
 }
 function cancelFixedForm(){ editingFixedId=null; refreshLedgerViews(); }
 function showFixedForm(cat){
@@ -866,20 +892,23 @@ function editFixed(id){
 }
 function saveFixed_(cat){
   const name=document.getElementById('fx-name').value.trim();
-  const amt=parseFloat(document.getElementById('fx-amt').value);
+  const linkEl=document.getElementById('fx-link');
+  const linkProp=!!(linkEl&&linkEl.checked);
+  const amt=linkProp ? fixedAmount({linkProp:true}) : parseFloat(document.getElementById('fx-amt').value);
   const freq=document.getElementById('fx-freq').value;
   const start=document.getElementById('fx-start').value;
-  if(!name || !(amt>0) || !start){ alert('请填写名称、金额、首次扣款日'); return; }
+  if(!name || !start){ alert('请填写名称和首次扣款日'); return; }
+  if(!linkProp && !(amt>0)){ alert('请填写金额'); return; }
   const list=loadFixed();
   if(editingFixedId){
     const it=list.find(function(x){ return x.id===editingFixedId; });
-    if(it){ it.name=name; it.amount=Math.round(amt*100)/100; it.freq=freq; it.start=start; }
+    if(it){ it.name=name; it.amount=Math.round(amt*100)/100; it.freq=freq; it.start=start; it.linkProp=linkProp; }
   }else{
     // 同分类同名视为同一笔；真要建两笔同名的，加个序号区分
     let fid=stableId('f',[cat,name]), n=1;
     while(list.some(function(x){ return x.id===fid; })) fid=stableId('f',[cat,name,++n]);
     list.push({id:fid, name:name, amount:Math.round(amt*100)/100,
-               category:cat, freq:freq, start:start, enabled:true});
+               category:cat, freq:freq, start:start, enabled:true, linkProp:linkProp});
   }
   if(!saveFixed(list)) return;
   editingFixedId=null;

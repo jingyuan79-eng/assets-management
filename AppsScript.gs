@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  v11 (2026-09-01)
+ * 资产驾驶舱 · Google Apps Script 后端  v12 (2026-09-01)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -7,6 +7,14 @@
  * 时区：America/Phoenix（Arizona 不用夏令时）
  *
  * ── 改动记录（每次改代码请在最上方补一条，旧条目保留）──────────────
+ *
+ * v12 2026-09-01  修 Property / Config 建不出来
+ *   · readAllInner 里补上 configSheet / propertySheet 调用。原先这两张表
+ *     只在写入时才建，而打开小程序是纯读 —— 表永远不出现，用户在 Sheet
+ *     里看不到任何东西，也就无从填写
+ *   · propertySheet 建表时字段一律留空，不再填 0。readProperty 只跳过
+ *     空值，0 是「有效值」—— 填 0 会让下一次同步把小程序里真实的房产
+ *     数字全部覆盖成零
  *
  * v11 2026-09-01  房产搬进 Sheet（Property 表）
  *   · 新增 Property 表（脚本自建）：A:Field B:Value，一行一个字段
@@ -1148,17 +1156,16 @@ function saveConfig(ss, data) {
 // 和流动现金同构：存锚点，不存「当前余额」—— 当前余额随时间推算，
 // 改了 extra 立刻反映到未来每一期，不需要回头重算历史。
 var PROP_FIELDS = ["value","loan","origLoan","rate","termYears","payment","extra","updated"];
-var PROP_DEFAULT = { value:0, loan:0, origLoan:0, rate:0, termYears:30,
-                     payment:0, extra:0, updated:"" };
+// 建表时一律留空。绝不能填 0 —— readProperty 只跳过空值，0 是「有效值」，
+// 会被当成真实数据把小程序里的房产数字覆盖成零。留空则读出 null，
+// 前端保持本地值并把它上传上来（和 Config 一样的迁移路径）。
 
 function propertySheet(ss) {
   var sh = ss.getSheetByName("Property");
   if (!sh) {
     sh = ss.insertSheet("Property");
     var rows = [["Field", "Value"]];
-    for (var i = 0; i < PROP_FIELDS.length; i++) {
-      rows.push([PROP_FIELDS[i], PROP_DEFAULT[PROP_FIELDS[i]]]);
-    }
+    for (var i = 0; i < PROP_FIELDS.length; i++) rows.push([PROP_FIELDS[i], ""]);
     sh.getRange(1, 1, rows.length, 2).setValues(rows);
     return sh;
   }
@@ -1326,6 +1333,10 @@ function readAll() {
 
 function readAllInner(force) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  // 这两张表在读路径里也要确保存在 —— 否则只打开小程序（纯读）永远不会
+  // 建出来，用户在 Sheet 里看不到任何东西，也就无从填写。建表是幂等的。
+  safeRun(function () { configSheet(ss); }, null);
+  safeRun(function () { propertySheet(ss); }, null);
 
   // ---- Stock ----
   var sh = ss.getSheetByName("Stock");

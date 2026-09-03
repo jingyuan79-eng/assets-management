@@ -1116,3 +1116,78 @@ console.log('\n— 房产搬进 Sheet —');
   ok('额外还本调高后余额降得更多',
      w.eval("(function(){PROPERTY.extra=2000;return amortizeNow();})()")<next);
 }
+
+// ══════════════ 十八、表要在读路径里建出来 + 房贷联动 ══════════════
+// 上一版 Property / Config 只在写入时建表，纯打开小程序（只读）永远建不出来，
+// 用户在 Sheet 里什么都看不到。而且建表时填 0 会更糟 —— readProperty 只跳过
+// 空值，0 是「有效值」，会把小程序里真实的房产数字覆盖成零。
+console.log('\n— 建表与房贷联动 —');
+{
+  function fresh(){
+    const tabs={Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+      Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+      Anchor:mkSheet('Anchor',[['date','amount','note']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[])};
+    const {doGet}=backend(tabs);
+    return {tabs, doGet};
+  }
+  const f=fresh();
+  const r=J(f.doGet({parameter:{}}));
+  ok('只读一次就把 Property 表建出来了', !!f.tabs.Property);
+  ok('也把 Config 表建出来了', !!f.tabs.Config);
+  const pv=f.tabs.Property._rows.slice(1).map(x=>x[1]);
+  ok('建表时字段一律留空，不填 0', pv.every(x=>x===''), JSON.stringify(pv));
+  ok('留空时 readProperty 返回 null（不会拿 0 去覆盖真实数据）', r.property===null);
+
+  // 前端：Sheet 没数据时把本地的传上去
+  const calls=[];
+  function app(serverProp){
+    calls.length=0;
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+          if(a){ calls.push(Object.fromEntries(url.searchParams));
+                 return Promise.resolve({json:async()=>({status:'success'})}); }
+          return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+            monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},savings:[],bond:[],
+            notices:[],hsa:null,retire:[],config:{},property:serverProp,
+            serverDate:'2026-09-01'})}); };
+        w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return dom.window;
+  }
+  let w=app(null); await wait(500);
+  ok('Sheet 上没有房产数据时，自动把本地的上传',
+     calls.some(c=>c.action==='saveProperty'), calls.map(c=>c.action).join(','));
+  ok('本地的估值没被清零', w.eval("PROPERTY.value")>0, '$'+w.eval("PROPERTY.value"));
+
+  // 就算服务器真回了一份全 0，也不该把本地清掉
+  w=app({value:0,loan:0,payment:0,extra:0,updated:''}); await wait(500);
+  ok('服务器回全 0 时不覆盖本地（视为未填写）', w.eval("PROPERTY.value")>0,
+     '$'+w.eval("PROPERTY.value"));
+
+  // ---- 方案 B：固定支出金额跟随房贷 ----
+  w=app({value:415000,loan:263000,origLoan:315000,rate:5.124,
+         termYears:30,payment:2025,extra:600,updated:'2026-08-01'}); await wait(500);
+  ok('房产参数已从 Sheet 取回', w.eval("PROPERTY.payment")===2025 && w.eval("PROPERTY.extra")===600);
+  ok('跟随房贷的金额 = 月供 + 额外还本',
+     w.eval("fixedAmount({linkProp:true})")===2625, w.eval("fixedAmount({linkProp:true})"));
+  ok('没勾跟随的仍用自己填的金额',
+     w.eval("fixedAmount({amount:70})")===70);
+
+  w.eval(`saveFixed([{id:'fm',name:'房贷月供',category:'Bill & utilities',
+    freq:'monthly',start:'2026-08-03',enabled:true,linkProp:true,amount:0}])`);
+  w.openDetail('cash'); w.switchCashTab('ex'); w.openExpenseDrill('Bill & utilities');
+  const txt=w.document.getElementById('cashTabBody').textContent;
+  ok('列表里显示的是联动后的金额 $2,625', /2,625/.test(txt), txt.slice(0,80));
+  ok('并标注「跟随房贷」', /跟随房贷/.test(txt));
+
+  // 改额外还本后，金额自动跟着变
+  w.eval("PROPERTY.extra=1500;");
+  ok('把额外还本改成 1500 后自动变 $3,525',
+     w.eval("fixedAmount({linkProp:true})")===3525, w.eval("fixedAmount({linkProp:true})"));
+  w.openExpenseDrill('Bill & utilities');
+  ok('列表也跟着变', /3,525/.test(w.document.getElementById('cashTabBody').textContent));
+}
