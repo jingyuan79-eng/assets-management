@@ -689,7 +689,11 @@ console.log('\n— 保存配置后立刻生效 / 跨月保留 —');
   ok('Payroll 保存后立刻显示「已设」（不等写请求）',
      /已设/.test(d.getElementById('cashTabBody').textContent),
      d.getElementById('cashTabBody').textContent.slice(0,40));
-  ok('此刻补记的写请求还没回来', calls.length===0, `已完成 ${calls.length} 次`);
+  // 同步/保存过程中会顺带发 saveConfig、saveProperty 这类备份请求，
+  // 它们不是「补记」。这里只数 autoLedger。
+  ok('此刻补记的写请求还没回来',
+     calls.filter(c=>(c.action||c)==='autoLedger').length===0,
+     `已完成 ${calls.length} 次：${calls.map(c=>c.action||c).join(',')}`);
   ok('配置确实写进了 localStorage', !!w.localStorage.getItem('incomeConfig_v1'));
   await wait(1800);
   ok('后台补记跑完后仍显示「已设」',
