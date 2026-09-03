@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  v12 (2026-09-01)
+ * 资产驾驶舱 · Google Apps Script 后端  V6.2  (2026-09-02)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -8,7 +8,19 @@
  *
  * ── 改动记录（每次改代码请在最上方补一条，旧条目保留）──────────────
  *
- * v12 2026-09-01  修 Property / Config 建不出来
+ * 版本号规则：主版本 = 改到第几个模块，小版本 = 该模块下的第几轮改动。
+ * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
+ * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
+ * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V6.2 2026-09-02  房贷当前余额写进 Sheet；修锚点日期的时区
+ *   · Property 表新增一行 balanceNow(自动算)：从锚点按整月摊销推算出的
+ *     当前余额。loan 那一格是锚点、不会自己变，只盯着它容易误以为没更新
+ *   · 内容没变就不重写，正常每月只产生一次写入
+ *   · 前端 saveExtra 原本用 new Date().toISOString() 取锚点日期 —— 那是
+ *     UTC，亚利桑那下午 5 点后会写成明天。改用 fmtD(todayD())
+ *
+ * v12 2026-09-02  修 Property / Config 建不出来
  *   · readAllInner 里补上 configSheet / propertySheet 调用。原先这两张表
  *     只在写入时才建，而打开小程序是纯读 —— 表永远不出现，用户在 Sheet
  *     里看不到任何东西，也就无从填写
@@ -1196,6 +1208,47 @@ function readProperty(ss) {
   return got ? out : null;
 }
 
+// 当前余额 = 从锚点按整月摊销推算，和小程序里的 amortizeNow 同一套算法。
+// Sheet 上的 loan 是锚点（updated 那天的余额），不会自己变；把推算值单独
+// 写一行，你在 Sheet 里才看得到「现在到底欠多少」。
+function propBalanceNow(p) {
+  if (!p || !(p.loan > 0)) return null;
+  var start = s2d(p.updated);
+  if (!start || isNaN(start.getTime())) return null;
+  var today = todaySv();
+  var months = (today.getFullYear() - start.getFullYear()) * 12 +
+               (today.getMonth() - start.getMonth());
+  if (months < 0) months = 0;
+  var mRate = (p.rate || 0) / 100 / 12;
+  var bal = p.loan;
+  for (var m = 0; m < months && bal > 0; m++) {
+    var interest = bal * mRate;
+    var principal = ((p.payment || 0) - interest) + (p.extra || 0);
+    if (principal <= 0) break;                 // 月供还不够付利息，余额只会涨，不往下算
+    if (principal > bal) principal = bal;
+    bal -= principal;
+  }
+  return Math.round(bal < 0 ? 0 : bal);
+}
+
+// 把推算出来的当前余额写进 Sheet（内容没变就不写，避免每次打开都产生一次写）
+function writePropBalance(ss, p) {
+  var now = propBalanceNow(p);
+  if (now == null) return null;
+  var sh = propertySheet(ss);
+  var last = sh.getLastRow();
+  var row = -1;
+  if (last > 1) {
+    var keys = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (var i = 0; i < keys.length; i++) {
+      if ((keys[i][0] || "").toString().trim() === "balanceNow(自动算)") { row = i + 2; break; }
+    }
+  }
+  if (row < 0) { sh.appendRow(["balanceNow(自动算)", now]); return now; }
+  if ((parseFloat(sh.getRange(row, 2).getValue()) || 0) !== now) sh.getRange(row, 2).setValue(now);
+  return now;
+}
+
 function saveProperty(ss, data) {
   var sh = propertySheet(ss);
   var last = sh.getLastRow();
@@ -1449,7 +1502,11 @@ function readAllInner(force) {
            bond: safeRun(function () { return runBonds(ss, bs); }, []),
            hsa: safeRun(function () { return runHsa(ss, lv); }, null),
            config: safeRun(function () { return readConfig(ss); }, {}),
-           property: safeRun(function () { return readProperty(ss); }, null),
+           property: safeRun(function () {
+             var p = readProperty(ss);
+             if (p) p.balanceNow = writePropBalance(ss, p);
+             return p;
+           }, null),
            retire: readTab(ss, "Retire"),
            serverDate: Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd") };
 }

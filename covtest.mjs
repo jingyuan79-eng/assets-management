@@ -1195,3 +1195,61 @@ console.log('\n— 建表与房贷联动 —');
   w.openExpenseDrill('Bill & utilities');
   ok('列表也跟着变', /3,525/.test(w.document.getElementById('cashTabBody').textContent));
 }
+
+// ══════════════ 十九、Sheet 上要看得到「当前欠多少」 ══════════════
+// Property 表里的 loan 是锚点，不会自己变。只盯着它会误以为余额没更新。
+// 后端另写一行 balanceNow(自动算)，按整月摊销推算。
+console.log('\n— 房贷当前余额写进 Sheet —');
+{
+  const PHEAD=['Field','Value'];
+  function runP(rows){
+    const P=mkSheet('Property',[PHEAD,...rows]);
+    const tabs={Property:P, Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+      Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+      Anchor:mkSheet('Anchor',[['date','amount','note']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[])};
+    const {doGet}=backend(tabs);
+    return {get:()=>J(doGet({parameter:{}})).property, P};
+  }
+  const T=new Date(); const ym=(d)=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-01`;
+  const thisMonth=ym(T);
+  const sixAgo=new Date(T.getFullYear(), T.getMonth()-6, 1);
+
+  // 锚点就是本月 → 还没走过一整月，当前余额 = 锚点
+  let a=runP([['value',415000],['loan',263000],['origLoan',315000],['rate',5.124],
+              ['termYears',30],['payment',2025],['extra',600],['updated',thisMonth]]);
+  ok('锚点当月：当前余额 = 锚点值', a.get().balanceNow===263000, String(a.get().balanceNow));
+
+  // 锚点在 6 个月前 → 应该少了一截
+  let b=runP([['value',415000],['loan',263000],['origLoan',315000],['rate',5.124],
+              ['termYears',30],['payment',2025],['extra',600],['updated',ym(sixAgo)]]);
+  const six=b.get().balanceNow;
+  ok('锚点在 6 个月前：余额明显下降', six<263000 && six>240000, '$'+six);
+  ok('写进了 Sheet 的 balanceNow 行',
+     b.P._rows.some(r=>String(r[0])==='balanceNow(自动算)' && Number(r[1])===six),
+     JSON.stringify(b.P._rows.find(r=>String(r[0])==='balanceNow(自动算)')));
+  ok('loan 那一格仍是锚点，没被改写',
+     Number(b.P._rows.find(r=>String(r[0])==='loan')[1])===263000);
+
+  // 额外还本调高 → 当前余额更低
+  let c=runP([['value',415000],['loan',263000],['origLoan',315000],['rate',5.124],
+              ['termYears',30],['payment',2025],['extra',2000],['updated',ym(sixAgo)]]);
+  ok('额外还本调高后当前余额更低', c.get().balanceNow<six, '$'+c.get().balanceNow);
+
+  // 内容没变就不重复写
+  const before=JSON.stringify(b.P._rows);
+  b.get();
+  ok('再读一次不重复写', JSON.stringify(b.P._rows)===before);
+
+  // 月供不够付利息时不该把余额算成负数或死循环
+  let d=runP([['value',415000],['loan',263000],['rate',20],['payment',10],
+              ['extra',0],['updated',ym(sixAgo)]]);
+  ok('月供不足以付息时安全退出，不出负数',
+     d.get().balanceNow>=0 && d.get().balanceNow<=263000, String(d.get().balanceNow));
+
+  // 前端锚点日期不能再用 UTC
+  ok('前端不再用 toISOString 取锚点日期',
+     !/PROPERTY\.updated\s*=\s*new Date\(\)\.toISOString/.test(html));
+}
