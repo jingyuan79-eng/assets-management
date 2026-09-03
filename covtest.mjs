@@ -1038,3 +1038,81 @@ console.log('\n— 设置备份到 Sheet —');
   ok('本地写入失败时仍备份到 Sheet',
      f.calls.some(x=>x.action==='saveConfig' && x.key==='incomeConfig_v1'));
 }
+
+// ══════════════ 十七、房产搬进 Sheet ══════════════
+// 房产参数以前只在 localStorage。现在走 Sheet 的 Property 表（可读键值表，
+// 不是 JSON blob），你能直接在表里看和改，以后也方便把月供接进固定支出。
+// 存的是锚点（updated 那天的余额），当前余额按整月摊销推算。
+console.log('\n— 房产搬进 Sheet —');
+{
+  const PHEAD=['Field','Value'];
+  function runP(rows){
+    const P=rows?mkSheet('Property',[PHEAD,...rows]):null;
+    const tabs={Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+      Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+      Anchor:mkSheet('Anchor',[['date','amount','note']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[])};
+    if(P) tabs.Property=P;
+    const {doGet}=backend(tabs);
+    return {get:()=>J(doGet({parameter:{}})), doGet, tabs};
+  }
+  // 表不存在时不该崩，property 返回 null
+  let a=runP(null);
+  ok('没有 Property 表时返回 null，不报错', a.get().property===null);
+
+  // 有表时读出来
+  let b=runP([['value',415000],['loan',263000],['origLoan',315000],['rate',5.124],
+              ['termYears',30],['payment',2025],['extra',600],['updated','2026-08-01']]);
+  const pr=b.get().property;
+  ok('读出房屋估值', pr.value===415000, String(pr.value));
+  ok('读出锚点余额', pr.loan===263000, String(pr.loan));
+  ok('读出利率（小数不被取整）', Math.abs(pr.rate-5.124)<1e-9, String(pr.rate));
+  ok('读出锚点日期', pr.updated==='2026-08-01', String(pr.updated));
+  ok('读出每月额外还本', pr.extra===600, String(pr.extra));
+
+  // 写回：只改 extra，其他字段不动
+  J(b.doGet({parameter:{action:'saveProperty', extra:1500}}));
+  const pr2=b.get().property;
+  ok('改额外还本写回 Sheet', pr2.extra===1500, String(pr2.extra));
+  ok('没传的字段保持不变', pr2.value===415000 && pr2.loan===263000 && pr2.updated==='2026-08-01');
+
+  // 表缺字段时用默认值补齐、不崩
+  let c=runP([['value',400000],['loan',200000]]);
+  const pr3=c.get().property;
+  ok('只填了部分字段也能读出来', pr3.value===400000 && pr3.loan===200000);
+
+  // 前端：服务器值覆盖本地，并且保存时写回 Sheet
+  const SRV={value:500000,loan:250000,origLoan:315000,rate:4.5,
+             termYears:30,payment:2100,extra:800,updated:'2026-09-01'};
+  const calls=[];
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=(u)=>{ const url=new URL(u), act=url.searchParams.get('action');
+        if(act){ calls.push(Object.fromEntries(url.searchParams));
+                 return Promise.resolve({json:async()=>({status:'success'})}); }
+        return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+          monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},savings:[],bond:[],
+          notices:[],hsa:null,retire:[],config:{},property:SRV,serverDate:'2026-09-01'})}); };
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window; await wait();
+  ok('前端采用 Sheet 上的估值', w.eval("PROPERTY.value")===500000, w.eval("PROPERTY.value"));
+  ok('前端采用 Sheet 上的额外还本', w.eval("PROPERTY.extra")===800, w.eval("PROPERTY.extra"));
+  ok('房产不再走 Config（避免两个真相源）',
+     w.eval("CFG_KEYS.indexOf('property_v1')")===-1);
+  w.eval("PROPERTY.extra=1200; persistProp();"); await wait(300);
+  const sent=calls.filter(c=>c.action==='saveProperty');
+  ok('改完写回 Sheet', sent.length>0, `${sent.length} 次`);
+  ok('写回的内容带上新值', sent.length>0 && +sent[sent.length-1].extra===1200,
+     sent.length?sent[sent.length-1].extra:'');
+
+  // 摊销：锚点当月不动，跨月才走一步
+  ok('锚点当月余额 = 锚点值（房贷按月还，月中不变）',
+     w.eval("(function(){PROPERTY.updated='2026-09-01';PROPERTY.loan=250000;return amortizeNow();})()")===250000);
+  const next=w.eval("(function(){PROPERTY.updated='2026-08-01';PROPERTY.loan=250000;return amortizeNow();})()");
+  ok('跨一个月后余额下降', next<250000, '$'+next);
+  ok('额外还本调高后余额降得更多',
+     w.eval("(function(){PROPERTY.extra=2000;return amortizeNow();})()")<next);
+}

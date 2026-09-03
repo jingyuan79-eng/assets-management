@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  v10 (2026-09-01)
+ * 资产驾驶舱 · Google Apps Script 后端  v11 (2026-09-01)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -7,6 +7,16 @@
  * 时区：America/Phoenix（Arizona 不用夏令时）
  *
  * ── 改动记录（每次改代码请在最上方补一条，旧条目保留）──────────────
+ *
+ * v11 2026-09-01  房产搬进 Sheet（Property 表）
+ *   · 新增 Property 表（脚本自建）：A:Field B:Value，一行一个字段
+ *     value / loan / origLoan / rate / termYears / payment / extra / updated
+ *     做成可读的键值表而不是 JSON blob —— 你能直接在表里看和改，
+ *     以后把房贷月供接进固定支出也好取数
+ *   · 新增 action saveProperty，readAll 返回 property
+ *   · 与流动现金同构：存的是锚点（updated 那天的余额），当前余额按整月
+ *     摊销推算。所以改 extra 会立刻影响未来每一期，不用回头重算历史
+ *   · 前端把 property_v1 从 Config 备份列表里摘出去，避免两个真相源
  *
  * v10 2026-09-01  设置搬进 Sheet（Config 表）
  *   · 新增 Config 表（脚本自建）：A:key  B:value(JSON)
@@ -167,6 +177,7 @@ function handleActionInner(data) {
     case "dismissNotice":return dismissNotice(ss, data);
     case "updateHsa":    return updateHsa(ss, data);
     case "saveConfig":   return saveConfig(ss, data);
+    case "saveProperty": return saveProperty(ss, data);
 
     case "updateStock": return updateStock(ss, data);
     case "addStock":    return addStock(ss, data);
@@ -1121,6 +1132,84 @@ function saveConfig(ss, data) {
   return { status: "success", type: "saveConfig", key: key };
 }
 
+// ==================== Property（房产 / 房贷）====================
+// A:Field  B:Value，一行一个字段。做成可读的键值表而不是 JSON blob，
+// 是为了你能直接在 Sheet 里看和改，以后也方便把房贷月供接进固定支出。
+//
+//   value      房屋估值
+//   loan       锚点余额（Updated 那天的贷款余额）
+//   origLoan   原始贷款额，用来算已还本金比例
+//   rate       年利率（%）
+//   termYears  贷款年限
+//   payment    标准月供
+//   extra      每月额外还本
+//   updated    锚点日期；余额从这天起按整月摊销
+//
+// 和流动现金同构：存锚点，不存「当前余额」—— 当前余额随时间推算，
+// 改了 extra 立刻反映到未来每一期，不需要回头重算历史。
+var PROP_FIELDS = ["value","loan","origLoan","rate","termYears","payment","extra","updated"];
+var PROP_DEFAULT = { value:0, loan:0, origLoan:0, rate:0, termYears:30,
+                     payment:0, extra:0, updated:"" };
+
+function propertySheet(ss) {
+  var sh = ss.getSheetByName("Property");
+  if (!sh) {
+    sh = ss.insertSheet("Property");
+    var rows = [["Field", "Value"]];
+    for (var i = 0; i < PROP_FIELDS.length; i++) {
+      rows.push([PROP_FIELDS[i], PROP_DEFAULT[PROP_FIELDS[i]]]);
+    }
+    sh.getRange(1, 1, rows.length, 2).setValues(rows);
+    return sh;
+  }
+  if ((sh.getRange(1, 1).getValue() || "").toString().trim() !== "Field") {
+    sh.getRange(1, 1, 1, 2).setValues([["Field", "Value"]]);
+  }
+  return sh;
+}
+
+function readProperty(ss) {
+  var sh = ss.getSheetByName("Property");
+  if (!sh || sh.getLastRow() < 2) return null;
+  var v = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues();
+  var out = {}, got = false;
+  for (var i = 0; i < v.length; i++) {
+    var k = (v[i][0] || "").toString().trim();
+    if (PROP_FIELDS.indexOf(k) < 0) continue;
+    var raw = v[i][1];
+    if (raw === "" || raw == null) continue;
+    if (k === "updated") {
+      var d = s2d(raw);
+      out[k] = (d && !isNaN(d.getTime())) ? d2s(d) : raw.toString().trim();
+    } else {
+      out[k] = parseFloat(raw) || 0;
+    }
+    got = true;
+  }
+  return got ? out : null;
+}
+
+function saveProperty(ss, data) {
+  var sh = propertySheet(ss);
+  var last = sh.getLastRow();
+  var have = {};
+  if (last > 1) {
+    var keys = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (var i = 0; i < keys.length; i++) {
+      have[(keys[i][0] || "").toString().trim()] = i + 2;
+    }
+  }
+  for (var j = 0; j < PROP_FIELDS.length; j++) {
+    var f = PROP_FIELDS[j];
+    if (data[f] == null || data[f] === "") continue;
+    var val = (f === "updated") ? data[f].toString().trim() : (parseFloat(data[f]) || 0);
+    if (have[f]) sh.getRange(have[f], 2).setValue(val);
+    else { sh.appendRow([f, val]); have[f] = sh.getLastRow(); }
+  }
+  return { status: "success", type: "saveProperty",
+           property: safeRun(function () { return readProperty(ss); }, null) };
+}
+
 // ==================== 通知（自动发生的事）====================
 function noticeSheet(ss) {
   var sh = ss.getSheetByName("Notices");
@@ -1349,6 +1438,7 @@ function readAllInner(force) {
            bond: safeRun(function () { return runBonds(ss, bs); }, []),
            hsa: safeRun(function () { return runHsa(ss, lv); }, null),
            config: safeRun(function () { return readConfig(ss); }, {}),
+           property: safeRun(function () { return readProperty(ss); }, null),
            retire: readTab(ss, "Retire"),
            serverDate: Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd") };
 }

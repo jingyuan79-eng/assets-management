@@ -282,7 +282,20 @@ const PROPERTY = {
   termYears:30, payment:2025, extra:600, updated:"2026-08-01"
 };
 try{ const sp=JSON.parse(localStorage.getItem('property_v1')||'null'); if(sp) Object.assign(PROPERTY,sp); }catch(e){}
-function persistProp(){ localStorage.setItem('property_v1', JSON.stringify(PROPERTY)); }
+function persistProp(){
+  try{ localStorage.setItem('property_v1', JSON.stringify(PROPERTY)); }catch(e){}
+  // Sheet 才是真相源；本地只是快取，换设备/清数据都不影响
+  apiWrite(Object.assign({action:'saveProperty'}, PROPERTY));
+}
+// 服务器算好的房产参数覆盖本地。只覆盖真的有值的字段，
+// Sheet 上某一格留空时不要把本地的数清掉。
+function rebuildProperty(info){
+  if(!info) return;
+  Object.keys(info).forEach(function(k){
+    if(info[k]!=null && info[k]!=='') PROPERTY[k]=info[k];
+  });
+  try{ localStorage.setItem('property_v1', JSON.stringify(PROPERTY)); }catch(e){}
+}
 
 const ORDER = ['stock','cd','bond','hsa','cash'];
 const ORDER_TAX = ['retire'];
@@ -329,8 +342,9 @@ const SYM_DESC = {
 // 需要备份到 Sheet 的「设置类」数据。localStorage 只是本地快取，
 // Sheet 才是真相源 —— iOS 重新 add to home screen 会开一个全新的存储容器，
 // 清网站数据、换设备同理，只存本地等于没有备份。
+// 房产走专用的 Property 表（可读键值表），不放这里，免得两个真相源
 const CFG_KEYS=['fixedExpenses_v1','incomeConfig_v1','recurringTransfers_v1',
-                'hsaConfig_v1','k401_v1','property_v1'];
+                'hsaConfig_v1','k401_v1'];
 function persistCfg(key, val, label){
   const json=JSON.stringify(val);
   let localOk=true;
@@ -408,7 +422,7 @@ cleanLegacyKeys(); loadStock();
 
 // 版本号：改完代码顺手 +1。用来确认手机上打开的到底是不是新版 ——
 // iOS 把网页加到主屏后会缓存 HTML，光看界面分不出新旧。
-const APP_VER='v2026.09.01-5';
+const APP_VER='v2026.09.01-6';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -537,6 +551,7 @@ function saveSheetCache(data){
     localStorage.setItem(CACHE_KEY, JSON.stringify({
       ts: Date.now(),
       savings: data.savings, bond: data.bond, cash: data.cash, hsa: data.hsa,
+      property: data.property,
       ledger: data.ledger, monthly: data.monthly,
       ledgerMonths: data.ledgerMonths, notices: data.notices
     }));
@@ -555,6 +570,7 @@ function loadSheetCache(){
   rebuildSavings(c.savings);
   rebuildBonds(c.bond);
   rebuildHsa(c.hsa);
+  rebuildProperty(c.property);
   rebuildMonthExpense();
   return true;
 }
@@ -594,6 +610,7 @@ function syncStockFromSheet(){
       notices = data.notices || [];
       syncOk = true;
       syncConfigFromSheet(data.config);   // 设置以 Sheet 为准，先落到本地再往下走
+      rebuildProperty(data.property);
       cacheTs = 0;                // 拿到新数据，屏幕上不再是缓存
       if(data.serverDate) ASOF = data.serverDate;   // 服务器日期，不受本机时区影响
       saveSheetCache(data);       // 供下次打开垫底
