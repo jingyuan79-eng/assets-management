@@ -277,9 +277,12 @@ const DATA = {
   },
 };
 
+// 房产参数以 Sheet 的 Property 表为准，本地不留种子（同 cd / bond / cash）：
+// 同步失败时宁可显示 $0，也不要拿一份写死的旧数字冒充真实余额 —— 那个数
+// 看起来完全合理，反而最难发现是假的。
 const PROPERTY = {
-  value:415000, loan:263000, origLoan:315000, rate:5.124,
-  termYears:30, payment:2025, extra:600, updated:"2026-08-01"
+  value:0, loan:0, origLoan:0, rate:0,
+  termYears:30, payment:0, extra:0, updated:""
 };
 try{ const sp=JSON.parse(localStorage.getItem('property_v1')||'null'); if(sp) Object.assign(PROPERTY,sp); }catch(e){}
 function persistProp(){
@@ -437,7 +440,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V6.2';
+const APP_VER='V6.3';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -1116,6 +1119,7 @@ load401k(); roll401k();
 
 // ==================== 房贷计算 ====================
 function amortizeNow(){
+  if(!PROPERTY.updated || !(PROPERTY.loan>0)) return Math.round(PROPERTY.loan||0);
   const monthlyRate = PROPERTY.rate/100/12;
   const start = new Date(PROPERTY.updated+'T00:00:00');
   const now = new Date();
@@ -1411,7 +1415,8 @@ function renderPropPage(){
   const bal=amortizeNow();
   const net=PROPERTY.value-bal;
   const paidPrincipal=PROPERTY.origLoan-bal;
-  const progress=(paidPrincipal/PROPERTY.origLoan*100);
+  // 还没填原贷金额时不能除零，否则进度条会显示成非数字
+  const progress=PROPERTY.origLoan>0 ? (paidPrincipal/PROPERTY.origLoan*100) : 0;
   const est=payoffEstimate();
   const yrs=Math.floor(est.months/12), mos=est.months%12;
   const mRate=PROPERTY.rate/100/12;

@@ -4,6 +4,13 @@ import { JSDOM } from 'jsdom'; import fs from 'fs';
 const gs=fs.readFileSync('AppsScript.gs','utf8');
 const html=fs.readFileSync('index.html','utf8');
 const ok=(l,c,e='')=>console.log((c?'✅':'❌'),l,e);
+// 只取渲染出来的文字：内联 <script> 的源码不算页面内容，
+// 否则代码里出现 isNaN、或注释里写了 NaN，都会让断言误报。
+const visibleText=(doc)=>{
+  const b=doc.body.cloneNode(true);
+  [].forEach.call(b.querySelectorAll('script,style'),n=>n.remove());
+  return b.textContent||'';
+};
 const wait=(ms=350)=>new Promise(r=>setTimeout(r,ms));
 
 function mkSheet(name,rows){return{_rows:rows,getName:()=>name,
@@ -932,7 +939,7 @@ console.log('\n— 总览卡片的年化收益率 —');
       w2.alert=()=>{}; w2.confirm=()=>true; w2.scrollTo=()=>{};
       w2.Element.prototype.scrollIntoView=function(){}; }});
   await wait();
-  ok('没有账户时不显示 +NaN%', !/NaN/.test(dom2.window.document.body.innerHTML));
+  ok('没有账户时不显示 +NaN%', !/NaN/.test(visibleText(dom2.window.document)));
   ok('没有账户时收益率为 null', dom2.window.eval("classYield('cd')")===null);
 }
 
@@ -1162,14 +1169,22 @@ console.log('\n— 建表与房贷联动 —');
         w.Element.prototype.scrollIntoView=function(){}; }});
     return dom.window;
   }
+  // 房产已改为不留种子：全新设备 + Sheet 也没数据时就该是 0，不该编一个出来
   let w=app(null); await wait(500);
-  ok('Sheet 上没有房产数据时，自动把本地的上传',
+  ok('全新设备且 Sheet 没数据时显示 0，不编造数字', w.eval("PROPERTY.value")===0);
+  // 本地有数据（比如老用户的缓存）才需要上传迁移
+  w=app(null);
+  w.eval("PROPERTY.value=415000; PROPERTY.loan=263000; PROPERTY.updated='2026-08-01';");
+  await w.eval("syncStockFromSheet()"); await wait(500);
+  ok('本地有数据而 Sheet 没有时，自动上传迁移',
      calls.some(c=>c.action==='saveProperty'), calls.map(c=>c.action).join(','));
-  ok('本地的估值没被清零', w.eval("PROPERTY.value")>0, '$'+w.eval("PROPERTY.value"));
+  ok('迁移后本地数据没被清零', w.eval("PROPERTY.value")===415000, '$'+w.eval("PROPERTY.value"));
 
-  // 就算服务器真回了一份全 0，也不该把本地清掉
-  w=app({value:0,loan:0,payment:0,extra:0,updated:''}); await wait(500);
-  ok('服务器回全 0 时不覆盖本地（视为未填写）', w.eval("PROPERTY.value")>0,
+  // 服务器回一份全 0 视为「未填写」，不能拿它覆盖本地已有的真实数据
+  w=app(null);
+  w.eval("PROPERTY.value=415000;");
+  await w.eval("syncStockFromSheet()"); await wait(400);
+  ok('服务器没有房产数据时不覆盖本地', w.eval("PROPERTY.value")===415000,
      '$'+w.eval("PROPERTY.value"));
 
   // ---- 方案 B：固定支出金额跟随房贷 ----
@@ -1252,4 +1267,51 @@ console.log('\n— 房贷当前余额写进 Sheet —');
   // 前端锚点日期不能再用 UTC
   ok('前端不再用 toISOString 取锚点日期',
      !/PROPERTY\.updated\s*=\s*new Date\(\)\.toISOString/.test(html));
+}
+
+// ══════════════ 二十、房产不再留写死的种子 ══════════════
+// 房产已经由 Sheet 驱动，本地就不该再留一份写死的数字 —— 断网或 Sheet
+// 还没填时，那个数看起来完全合理，反而最难发现是假的。
+console.log('\n— 房产不留种子 —');
+{
+  const SHEET_PROP={value:500000,loan:250000,origLoan:315000,rate:4.5,
+                    termYears:30,payment:2100,extra:800,updated:'2026-03-01'};
+  function run(serverProp, failSync){
+    const calls=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        w.fetch=(u)=>{ const a=new URL(u).searchParams.get('action');
+          if(a){ calls.push(Object.fromEntries(new URL(u).searchParams));
+                 return Promise.resolve({json:async()=>({status:'success'})}); }
+          return failSync ? Promise.reject(new Error('断网'))
+            : Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},ledger:[],
+              monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},savings:[],bond:[],
+              notices:[],hsa:null,retire:[],config:{},property:serverProp,
+              serverDate:'2026-09-02'})}); };
+        w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, calls};
+  }
+  // 清缓存 + 能连上 → 用 Sheet 的真实数据
+  let a=run(SHEET_PROP,false); await wait(600);
+  ok('同步后采用 Sheet 的锚点', a.w.eval("PROPERTY.loan")===250000, a.w.eval("PROPERTY.loan"));
+  ok('当前余额按 Sheet 的锚点推算', a.w.eval("amortizeNow()")<250000 && a.w.eval("amortizeNow()")>200000,
+     '$'+a.w.eval("amortizeNow()"));
+
+  // 清缓存 + 断网 → 显示 0，而不是一个看着合理的假数
+  let b=run(SHEET_PROP,true); await wait(600);
+  ok('断网时房贷余额为 0，不冒充真实数字', b.w.eval("amortizeNow()")===0, '$'+b.w.eval("amortizeNow()"));
+  ok('断网时估值也为 0', b.w.eval("PROPERTY.value")===0);
+  ok('代码里不再有写死的房贷数字', !/loan:263000|value:415000/.test(html));
+
+  // 锚点日期为空时不能算出 NaN
+  ok('锚点为空时不产生 NaN', !isNaN(b.w.eval("amortizeNow()")));
+  ok('页面上不出现 NaN', !/NaN/.test(visibleText(b.w.document)));
+
+  // Sheet 没数据但本地有 → 仍会上传做迁移
+  let c=run(null,false);
+  c.w.eval("PROPERTY.value=415000; PROPERTY.loan=263000; PROPERTY.updated='2026-08-01';");
+  await c.w.eval("syncStockFromSheet()"); await wait(500);
+  ok('本地有数据而 Sheet 没有时，仍会上传迁移',
+     c.calls.some(x=>x.action==='saveProperty'), c.calls.map(x=>x.action).join(','));
 }
