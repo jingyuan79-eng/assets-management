@@ -440,7 +440,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V6.3';
+const APP_VER='V7.0';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -569,7 +569,7 @@ function saveSheetCache(data){
     localStorage.setItem(CACHE_KEY, JSON.stringify({
       ts: Date.now(),
       savings: data.savings, bond: data.bond, cash: data.cash, hsa: data.hsa,
-      property: data.property,
+      property: data.property, stockHistory: data.stockHistory,
       ledger: data.ledger, monthly: data.monthly,
       ledgerMonths: data.ledgerMonths, notices: data.notices
     }));
@@ -589,6 +589,7 @@ function loadSheetCache(){
   rebuildBonds(c.bond);
   rebuildHsa(c.hsa);
   rebuildProperty(c.property);
+  stockHistory = Array.isArray(c.stockHistory) ? c.stockHistory : [];
   rebuildMonthExpense();
   return true;
 }
@@ -629,6 +630,7 @@ function syncStockFromSheet(){
       syncOk = true;
       syncConfigFromSheet(data.config);   // 设置以 Sheet 为准，先落到本地再往下走
       rebuildProperty(data.property);
+      stockHistory = Array.isArray(data.stockHistory) ? data.stockHistory : [];
       cacheTs = 0;                // 拿到新数据，屏幕上不再是缓存
       if(data.serverDate) ASOF = data.serverDate;   // 服务器日期，不受本机时区影响
       saveSheetCache(data);       // 供下次打开垫底
@@ -1319,6 +1321,68 @@ function refreshOpenDetail(){
   }
 }
 
+// ==================== 股票趋势曲线 ====================
+// 两条线：月末市值 与 累计投入。之间的距离就是累计收益 ——
+// 只看市值分不出「涨了」还是「只是一直在投钱」，对比才有意义。
+// 不引图表库（项目无依赖无构建），直接手写 SVG。
+let stockHistory=[];
+function renderStockChart(){
+  const wrap=document.getElementById('stockChart');
+  if(!wrap) return;
+  const d=stockHistory||[];
+  if(d.length<2){
+    wrap.innerHTML='<div class="placeholder" style="margin-bottom:14px">'+
+      '还没有足够的历史数据。在 Sheet 的 StockHistory 表里补上每月的'+
+      '「月末 account value」和「本月净入金」，这里就会出现走势图。</div>';
+    return;
+  }
+  const W=320, H=132, PL=6, PR=6, PT=10, PB=16;   // viewBox 尺寸，靠 CSS 拉伸自适应
+  const vals=d.map(x=>x.value), inv=d.map(x=>x.invested);
+  const hi=Math.max.apply(null, vals.concat(inv));
+  const lo=0;                                        // 从 0 起，避免视觉夸大涨幅
+  const x=i=>PL+(W-PL-PR)*(d.length===1?0:i/(d.length-1));
+  const y=v=>PT+(H-PT-PB)*(1-(v-lo)/((hi-lo)||1));
+  const line=a=>a.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ');
+  // 收益区域：市值线与投入线之间
+  const band=line(vals)+' '+inv.map((v,i)=>'L'+x(d.length-1-i).toFixed(1)+' '+
+      y(inv[d.length-1-i]).toFixed(1)).join(' ')+' Z';
+  const last=d[d.length-1];
+  const gain=Math.round(last.value-last.invested);
+  const pct=last.invested>0?(gain/last.invested*100):0;
+  const gc=gain>=0?'var(--pos)':'var(--neg)';
+  // 只标首尾年月，中间不挤
+  const lab=(i)=>d[i].ym.length>4?d[i].ym.slice(2):d[i].ym;
+  wrap.innerHTML=
+    '<div style="background:var(--card);border:1px solid var(--stock-ln);border-radius:var(--radius);'+
+      'padding:13px 14px 9px;margin-bottom:14px">'+
+      '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px">'+
+        '<div style="font-size:13px;font-weight:600">累计收益</div>'+
+        '<div class="num" style="font-size:17px;font-weight:650;color:'+gc+'">'+
+          (gain>=0?'+':'−')+'$'+fmt(Math.abs(gain))+
+          '<span style="font-size:12px;margin-left:5px">'+(gain>=0?'+':'−')+
+          Math.abs(pct).toFixed(1)+'%</span></div>'+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">'+
+        '市值 $'+fmt(Math.round(last.value))+' · 累计投入 $'+fmt(Math.round(last.invested))+'</div>'+
+      '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:132px;display:block" '+
+        'preserveAspectRatio="none">'+
+        '<path d="'+band+'" fill="'+(gain>=0?'var(--stock-bg)':'#fdecec')+'" opacity=".85"/>'+
+        '<path d="'+line(inv)+'" fill="none" stroke="var(--ink-faint)" stroke-width="1.4" '+
+          'stroke-dasharray="3 2.5" vector-effect="non-scaling-stroke"/>'+
+        '<path d="'+line(vals)+'" fill="none" stroke="var(--stock)" stroke-width="2" '+
+          'vector-effect="non-scaling-stroke"/>'+
+      '</svg>'+
+      '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint)">'+
+        '<span>'+lab(0)+'</span><span>'+lab(d.length-1)+'</span></div>'+
+      '<div style="display:flex;gap:14px;margin-top:6px;font-size:11px;color:var(--ink-2)">'+
+        '<span><span style="display:inline-block;width:14px;height:2px;background:var(--stock);'+
+          'vertical-align:middle;margin-right:4px"></span>市值</span>'+
+        '<span><span style="display:inline-block;width:14px;border-top:1.5px dashed var(--ink-faint);'+
+          'vertical-align:middle;margin-right:4px"></span>累计投入</span>'+
+      '</div>'+
+    '</div>';
+}
+
 // ==================== 详情页 ====================
 function openDetail(k, keepScroll){
   if(k==='retire') roll401k();
@@ -1401,7 +1465,8 @@ function openDetail(k, keepScroll){
   if(k==='stock')html+='<div id="stockAddWrap"></div>';
   if(c.ledger)   html+='<div id="incomeWrap"></div>';
 
-  body.innerHTML=html;
+  body.innerHTML=(k==='stock'?'<div id="stockChart"></div>':'')+html;
+  if(k==='stock')renderStockChart();
   if(k==='cd')   renderCdAdd();
   if(k==='bond') renderBondAdd();
   if(k==='stock')renderStockAdd();

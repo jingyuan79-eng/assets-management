@@ -1315,3 +1315,96 @@ console.log('\n— 房产不留种子 —');
   ok('本地有数据而 Sheet 没有时，仍会上传迁移',
      c.calls.some(x=>x.action==='saveProperty'), c.calls.map(x=>x.action).join(','));
 }
+
+// ══════════════ 二十一、股票趋势曲线 ══════════════
+// 两条线：月末市值 vs 累计投入。只看市值分不出「赚了」还是「一直在投钱」，
+// 两线之间的距离才是累计收益。历史手填，当月自动维护。
+console.log('\n— 股票趋势曲线 —');
+{
+  const SHHEAD=['年月','月初account value','本月净入金','月末account value','本月投资收益','月收益率'];
+  const T=new Date(); const curYM=`${T.getFullYear()}-${pad(T.getMonth()+1)}`;
+  function run(histRows, ledgerRows, stockRows){
+    const SH=mkSheet('StockHistory',[SHHEAD,...histRows]);
+    const tabs={StockHistory:SH,
+      Ledger:mkSheet('Ledger',[['Date','category','amount','note','key'],...(ledgerRows||[])]),
+      Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price'],...(stockRows||[])]),
+      Anchor:mkSheet('Anchor',[['date','amount','note']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[])};
+    const {doGet}=backend(tabs);
+    return {out:()=>J(doGet({parameter:{}})).stockHistory, SH};
+  }
+  // 你截图里的头几行
+  const hist=[['2022',0,7500,7572,72,0.0096],
+              ['2023-01',7572,0,8628,1056,0.1395],
+              ['2023-02',8628,0,8192,-436,-0.0505],
+              ['2023-04',8192,4000,12412,-176,-0.014]];
+  let a=run(hist,[],[['VOO','IndexETF',40,400,647.4]]);
+  const o=a.out();
+  ok('历史行都读出来了', o.length>=4, `${o.length} 条`);
+  ok('「2022」这种非年月的汇总行也保留', o[0].ym==='2022', o[0].ym);
+  ok('累计投入是逐月累加', o[0].invested===7500 && o[1].invested===7500 && o[3].invested===11500,
+     o.slice(0,4).map(x=>x.invested).join(','));
+  ok('市值取月末 account value', o[3].value===12412, String(o[3].value));
+
+  // 当月那一行自动追加：市值 = 股票账户总值，净入金 = 当月 Transfer · 券商
+  const cur=o[o.length-1];
+  ok('自动补上当月一行', cur.ym===curYM, cur.ym);
+  ok('当月市值 = 40股 × $647.4', Math.abs(cur.value-25896)<0.01, String(cur.value));
+
+  let b=run(hist,[[`${curYM}-03`,'Transfer · 券商',1500,'',''],
+                  [`${curYM}-09`,'Transfer · 券商',500,'',''],
+                  [`${curYM}-10`,'Dining',40,'','']],
+            [['VOO','IndexETF',40,400,647.4]]);
+  const cb=b.out();
+  const last=cb[cb.length-1];
+  ok('当月净入金 = 当月券商转账合计（1500+500）', last.net===2000, String(last.net));
+  ok('餐饮支出不算进净入金', last.net===2000);
+  ok('累计投入含当月', last.invested===11500+2000, String(last.invested));
+
+  // 历史行不能被改写
+  const before=JSON.stringify(b.SH._rows.slice(1,5));
+  b.out();
+  ok('历史行一律不动', JSON.stringify(b.SH._rows.slice(1,5))===before);
+
+  // 券商现金也要算进账户总值
+  let c=run(hist,[],[['VOO','IndexETF',10,400,100],['Cash','Gold.coin.cash','','',3000]]);
+  const lc=c.out()[c.out().length-1];
+  ok('账户总值含券商现金（10×100 + 3000）', Math.abs(lc.value-4000)<0.01, String(lc.value));
+
+  // 前端画图
+  const HIST=[{ym:'2023-01',value:8628,invested:7500,net:0},
+              {ym:'2023-06',value:13948,invested:12000,net:500},
+              {ym:'2024-08',value:25896,invested:18500,net:0}];
+  function app(h){
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        w.fetch=(u)=>{ const act=new URL(u).searchParams.get('action');
+          if(act) return Promise.resolve({json:async()=>({status:'success'})});
+          return Promise.resolve({json:async()=>({status:'success',
+            stock:[{symbol:'VOO',category:'IndexETF',shares:40,cost:400,price:647.4}],
+            expense:{},ledger:[],monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},
+            savings:[],bond:[],notices:[],hsa:null,retire:[],config:{},property:null,
+            stockHistory:h,serverDate:'2026-09-05'})}); };
+        w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return dom.window;
+  }
+  let w=app(HIST); await wait(500);
+  w.openDetail('stock');
+  const box=w.document.getElementById('stockChart');
+  ok('股票页顶部出现图表', !!box && /累计收益/.test(box.textContent));
+  ok('累计收益 = 市值 − 累计投入 = 7396', /7,396/.test(box.textContent), box.textContent.slice(0,60));
+  ok('收益率 +40.0%', /40\.0%/.test(box.textContent));
+  ok('两条折线都画了', box.querySelectorAll('svg path').length>=3,
+     String(box.querySelectorAll('svg path').length));
+  ok('图例标出市值与累计投入', /市值/.test(box.textContent) && /累计投入/.test(box.textContent));
+
+  // 数据不足时给出可操作的提示，而不是空白或坏图
+  w=app([]); await wait(500);
+  w.openDetail('stock');
+  const empty=w.document.getElementById('stockChart');
+  ok('没有历史数据时提示去 StockHistory 填', /StockHistory/.test(empty.textContent), empty.textContent.slice(0,40));
+  ok('不画出坏图', empty.querySelectorAll('svg').length===0);
+}

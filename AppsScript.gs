@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V6.3  (2026-09-02)
+ * 资产驾驶舱 · Google Apps Script 后端  V7.0  (2026-09-05)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,16 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V7.0 2026-09-05  股票趋势曲线（第 7 个模块）
+ *   · 新增 StockHistory 表（脚本自建，或把你已建好的那张改名过来）：
+ *       A:年月 B:月初account value C:本月净入金 D:月末account value
+ *       E:本月投资收益 F:月收益率
+ *     A 列允许「2022」这种非年月的汇总行，用来压缩记账起始日之前的历史
+ *   · 记账起始日之后不必手填：本月净入金取 Ledger 里当月「Transfer · 券商」
+ *     的合计，月末 value 取当前股票账户总值（含券商现金）
+ *   · 每次读取只维护「当月」那一行，历史行一律不碰；内容没变就不写
+ *   · readAll 新增 stockHistory：每月的 月末市值 与 累计投入
  *
  * V6.3 2026-09-02  房产不再留写死的种子
  *   · 前端 PROPERTY 的初始值全部清零（同 cd / bond / cash）。房产已由
@@ -1278,6 +1288,114 @@ function saveProperty(ss, data) {
            property: safeRun(function () { return readProperty(ss); }, null) };
 }
 
+// ==================== StockHistory（股票月度曲线）====================
+// 表结构（沿用你已经建好的那张，请把标签页命名为 StockHistory）：
+//   A:年月  B:月初account value  C:本月净入金  D:月末account value
+//   E:本月投资收益  F:月收益率
+//
+// A 列允许出现「2022」这种非年月的汇总行 —— 记账起始日之前的历史可以
+// 压成一行，图上作为起点。
+//
+// 记账起始日之后不需要你再手填：
+//   本月净入金 = Ledger 里当月 Transfer · 券商 的合计
+//   月末 value = 当前股票账户总值（含券商现金）
+// 每次读取时只更新「当月」那一行，历史行一律不碰。
+var SH_COL = { YM:1, START:2, NET:3, END:4, GAIN:5, RATE:6 };
+var SH_HEAD = ["年月", "月初account value", "本月净入金", "月末account value",
+               "本月投资收益", "月收益率"];
+
+function stockHistSheet(ss) {
+  var sh = ss.getSheetByName("StockHistory");
+  if (!sh) {
+    sh = ss.insertSheet("StockHistory");
+    sh.getRange(1, 1, 1, SH_HEAD.length).setValues([SH_HEAD]);
+  }
+  return sh;
+}
+
+function readStockHist(sh) {
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var v = sh.getRange(2, 1, last - 1, SH_HEAD.length).getValues();
+  var out = [];
+  for (var i = 0; i < v.length; i++) {
+    var ym = v[i][SH_COL.YM - 1];
+    if (ym === "" || ym == null) continue;
+    // 日期格的年月和纯文本都认；「2022」这种也原样保留
+    if (Object.prototype.toString.call(ym) === "[object Date]") ym = ymOf(ym);
+    else ym = ym.toString().trim();
+    out.push({
+      row: i + 2, ym: ym,
+      start: parseFloat(v[i][SH_COL.START - 1]) || 0,
+      net:   parseFloat(v[i][SH_COL.NET - 1])   || 0,
+      end:   parseFloat(v[i][SH_COL.END - 1])   || 0
+    });
+  }
+  out.sort(function (a, b) { return a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : 0; });
+  return out;
+}
+
+// 股票账户总值：各持仓 股数×现价，加上 Cash 行（金额借用 E 列）
+function stockAccountValue(stock) {
+  var sum = 0;
+  for (var i = 0; i < stock.length; i++) {
+    var sym = (stock[i].symbol || "").toString().trim().toUpperCase();
+    if (sym === "CASH" || sym === "现金") { sum += parseFloat(stock[i].price) || 0; continue; }
+    sum += (parseFloat(stock[i].shares) || 0) * (parseFloat(stock[i].price) || 0);
+  }
+  return Math.round(sum * 100) / 100;
+}
+
+// 当月净入金 = Ledger 里当月「Transfer · 券商」的合计
+function brokerInflow(lv, ym) {
+  var sum = 0;
+  for (var i = 1; i < lv.length; i++) {
+    if (!lv[i][0]) continue;
+    var cat = (lv[i][1] || "").toString().trim();
+    if (cat.indexOf("Transfer") !== 0 || cat.indexOf("券商") < 0) continue;
+    var d = s2d(lv[i][0]); if (!d) continue;
+    if (d2s(d).slice(0, 7) !== ym) continue;
+    sum += parseFloat(lv[i][2]) || 0;
+  }
+  return Math.round(sum * 100) / 100;
+}
+
+// 只维护「当月」那一行：历史是你手填的，一律不动
+function syncStockHist(ss, lv, stock) {
+  var sh = stockHistSheet(ss);
+  var rows = readStockHist(sh);
+  var ym = ymOf(new Date());
+  var endVal = stockAccountValue(stock);
+  var net = brokerInflow(lv, ym);
+  // 月初值取上一条历史的月末值；一条都没有就用「月末 − 本月净入金」倒推
+  var prev = null;
+  for (var i = 0; i < rows.length; i++) if (rows[i].ym < ym) prev = rows[i];
+  var startVal = prev ? prev.end : Math.round((endVal - net) * 100) / 100;
+  var gain = Math.round((endVal - startVal - net) * 100) / 100;
+  var rate = startVal + net > 0 ? gain / (startVal + net) : 0;
+  var line = [ym, startVal, net, endVal, gain, rate];
+
+  var cur = null;
+  for (var j = 0; j < rows.length; j++) if (rows[j].ym === ym) cur = rows[j];
+  if (!cur) { sh.appendRow(line); }
+  else {
+    var old = sh.getRange(cur.row, 1, 1, SH_HEAD.length).getValues()[0];
+    var same = (old[SH_COL.START-1] === startVal) && (old[SH_COL.NET-1] === net) &&
+               (old[SH_COL.END-1] === endVal);
+    if (!same) sh.getRange(cur.row, 1, 1, SH_HEAD.length).setValues([line]);
+  }
+  return readStockHist(sh);
+}
+
+// 下发给小程序：月末市值 + 累计投入（两条线之间的距离就是累计收益）
+function stockHistOut(rows) {
+  var cum = 0;
+  return rows.map(function (r) {
+    cum = Math.round((cum + r.net) * 100) / 100;
+    return { ym: r.ym, value: r.end, invested: cum, net: r.net };
+  });
+}
+
 // ==================== 通知（自动发生的事）====================
 function noticeSheet(ss) {
   var sh = ss.getSheetByName("Notices");
@@ -1510,6 +1628,9 @@ function readAllInner(force) {
            bond: safeRun(function () { return runBonds(ss, bs); }, []),
            hsa: safeRun(function () { return runHsa(ss, lv); }, null),
            config: safeRun(function () { return readConfig(ss); }, {}),
+           stockHistory: safeRun(function () {
+             return stockHistOut(syncStockHist(ss, lv, stock));
+           }, []),
            property: safeRun(function () {
              var p = readProperty(ss);
              if (p) p.balanceNow = writePropBalance(ss, p);
