@@ -1397,6 +1397,14 @@ console.log('\n— 股票趋势曲线 —');
   ok('股票页顶部出现图表', !!box && /累计收益/.test(box.textContent));
   ok('累计收益 = 市值 − 累计投入 = 7396', /7,396/.test(box.textContent), box.textContent.slice(0,60));
   ok('收益率 +40.0%', /40\.0%/.test(box.textContent));
+  ok('总额那一栏在曲线上面（hero 先出现）',
+     w.document.getElementById('d-body').innerHTML.indexOf('dhero') <
+     w.document.getElementById('d-body').innerHTML.indexOf('stockChart'));
+  ok('有 YTD / 1Y / 3Y / All 四个区间',
+     ['YTD','1Y','3Y','All'].every(t=>box.textContent.includes(t)));
+  ok('横轴四个刻度，不再只有首尾',
+     box.querySelectorAll('div[style*="justify-content:space-between"] span').length>=4,
+     String(box.querySelectorAll('div[style*="justify-content:space-between"] span').length));
   ok('两条折线都画了', box.querySelectorAll('svg path').length>=3,
      String(box.querySelectorAll('svg path').length));
   ok('图例标出市值与累计投入', /市值/.test(box.textContent) && /累计投入/.test(box.textContent));
@@ -1407,4 +1415,43 @@ console.log('\n— 股票趋势曲线 —');
   const empty=w.document.getElementById('stockChart');
   ok('没有历史数据时提示去 StockHistory 填', /StockHistory/.test(empty.textContent), empty.textContent.slice(0,40));
   ok('不画出坏图', empty.querySelectorAll('svg').length===0);
+}
+
+// 区间切换：期初基准取区间前一个点，所以 1Y 收益 ≠ 累计收益
+console.log('\n— 曲线的区间切换 —');
+{
+  const T=new Date(); const Y=T.getFullYear();
+  const h=[]; let cum=0, v=10000;
+  for(let yy=Y-4; yy<=Y; yy++) for(let mm=1; mm<=12; mm++){
+    if(yy===Y && mm>T.getMonth()+1) break;
+    cum+=100; v+=300;
+    h.push({ym:`${yy}-${pad(mm)}`, value:v, invested:cum, net:100});
+  }
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=(u)=>{ const a=new URL(u).searchParams.get('action');
+        if(a) return Promise.resolve({json:async()=>({status:'success'})});
+        return Promise.resolve({json:async()=>({status:'success',
+          stock:[{symbol:'VOO',category:'IndexETF',shares:10,cost:100,price:200}],
+          expense:{},ledger:[],monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},
+          savings:[],bond:[],notices:[],hsa:null,retire:[],config:{},property:null,
+          stockHistory:h,serverDate:`${Y}-${pad(T.getMonth()+1)}-05`})}); };
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window; await wait(500);
+  w.openDetail('stock');
+  const head=()=>w.document.getElementById('stockChart').querySelector('div>div>div').textContent;
+  w.setStockRange('all');
+  ok('All 显示「累计收益」', /累计收益/.test(head()), head().slice(0,20));
+  const allGain=head();
+  w.setStockRange('y1');
+  ok('1Y 显示「1Y 收益」', /1Y 收益/.test(head()), head().slice(0,20));
+  ok('1Y 收益小于累计收益（期初基准不同）', head()!==allGain, head().slice(0,26));
+  w.setStockRange('ytd');
+  ok('YTD 显示「YTD 收益」', /YTD 收益/.test(head()), head().slice(0,20));
+  ok('切区间后市值仍是最新一期',
+     /市值 \$/.test(w.document.getElementById('stockChart').textContent));
+  w.setStockRange('y3');
+  ok('3Y 也能切', /3Y 收益/.test(head()), head().slice(0,20));
+  ok('区间切换不产生非数字', !/NaN/.test(visibleText(w.document)));
 }
