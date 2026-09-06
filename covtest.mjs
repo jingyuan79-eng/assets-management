@@ -1455,3 +1455,104 @@ console.log('\n— 曲线的区间切换 —');
   ok('3Y 也能切', /3Y 收益/.test(head()), head().slice(0,20));
   ok('区间切换不产生非数字', !/NaN/.test(visibleText(w.document)));
 }
+
+// ══════════════ 二十二、RSU 单独记，并自动同步到 Stock ══════════════
+// RSU 表按归属批次记，是唯一数据源；Stock 表里 ASMIY 的股数和成本由脚本
+// 自动写。曲线刻意剔除 RSU —— 那部分你没掏钱，算进去会凭空多出「收益」。
+console.log('\n— RSU 单独记 —');
+{
+  const RHEAD=['Grant','Vest Date','Shares','Vest Price','Note'];
+  const T=new Date(); const past=fmt(daysAgo(200)), soon=fmt(daysAgo(-120));
+  function run(lots, stockRows){
+    const R=mkSheet('RSU',[RHEAD,...lots]);
+    const S=mkSheet('Stock',[['Symbol','Category','Share','Cost','Price'],...stockRows]);
+    const tabs={RSU:R, Stock:S,
+      StockHistory:mkSheet('StockHistory',[['年月','月初account value','本月净入金','月末account value','本月投资收益','月收益率']]),
+      Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+      Anchor:mkSheet('Anchor',[['date','amount','note']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[])};
+    const {doGet}=backend(tabs);
+    return {out:()=>J(doGet({parameter:{}})), S, R};
+  }
+  const lots=[['2023 Grant',fmt(daysAgo(400)),100,20,''],
+              ['2023 Grant',past,120,30,''],
+              ['2024 Grant',soon,150,'','未归属']];
+  const stk=[['ASMIY','Semiconductor',0,0,50],['VOO','IndexETF',10,400,600],
+             ['Cash','Gold.coin.cash','','',1000]];
+  let a=run(lots,stk);
+  const r=a.out().rsu;
+  ok('已归属股数 = 100 + 120', r.vestedShares===220, String(r.vestedShares));
+  ok('未归属股数 = 150', r.pendingShares===150, String(r.pendingShares));
+  ok('成本基准 = 100×20 + 120×30 = 5600', r.costBasis===5600, String(r.costBasis));
+  ok('加权平均归属价 = 5600/220', Math.abs(r.avgCost-25.4545)<0.001, String(r.avgCost));
+  ok('给出下次归属日期与股数',
+     r.nextVest && r.nextVest.date===soon && r.nextVest.shares===150, JSON.stringify(r.nextVest));
+  ok('自动写回 Stock 表的 ASMIY 股数',
+     Number(a.S._rows[1][2])===220, String(a.S._rows[1][2]));
+  ok('自动写回成本', Math.abs(Number(a.S._rows[1][3])-25.4545)<0.001, String(a.S._rows[1][3]));
+  ok('绝不碰 E 列的价格（GOOGLEFINANCE）', Number(a.S._rows[1][4])===50);
+
+  // 曲线要剔除 RSU：账户总值 = VOO 10×600 + 现金 1000 = 7000，不含 220×50
+  const hist=a.out().stockHistory;
+  ok('曲线的账户总值不含 RSU（10×600 + 1000 = 7000）',
+     Math.abs(hist[hist.length-1].value-7000)<0.01, String(hist[hist.length-1].value));
+
+  // 幂等：没变就不重复写
+  const before=JSON.stringify(a.S._rows);
+  a.out();
+  ok('股数没变就不重复写 Stock', JSON.stringify(a.S._rows)===before);
+
+  // 新归属一批 → 自动跟着涨
+  let b=run([...lots,['2024 Grant',fmt(daysAgo(5)),80,40,'']],stk);
+  ok('新归属一批后股数自动增加', b.out().rsu.vestedShares===300, String(b.out().rsu.vestedShares));
+  ok('成本基准跟着更新 = 5600 + 80×40', b.out().rsu.costBasis===8800, String(b.out().rsu.costBasis));
+
+  // 没建 RSU 表时不能影响其他模块
+  // 注意：mkSheet 直接引用传入的数组，前面的用例已经把 stk 写成 220 了，
+  // 这里必须自己造一份干净的，否则测的是脏数据
+  const freshStk=[['ASMIY','Semiconductor',7,3,50],['VOO','IndexETF',10,400,600],
+                  ['Cash','Gold.coin.cash','','',1000]];
+  const noR={Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price'],...freshStk]),
+    StockHistory:mkSheet('StockHistory',[['年月','月初account value','本月净入金','月末account value','本月投资收益','月收益率']]),
+    Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+    Anchor:mkSheet('Anchor',[['date','amount','note']]),
+    Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+    Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+    Ledger_monthly:mkSheet('Ledger_monthly',[])};
+  const g=backend(noR);
+  const rr=J(g.doGet({parameter:{}}));
+  ok('没有 RSU 表时返回 null，其他模块照常', rr.rsu===null && rr.status==='success');
+  ok('也不会把 Stock 的 ASMIY 清零', Number(noR.Stock._rows[1][2])===7,
+     String(noR.Stock._rows[1][2]));
+
+  // 前端展示
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=(u)=>{ const act=new URL(u).searchParams.get('action');
+        if(act) return Promise.resolve({json:async()=>({status:'success'})});
+        return Promise.resolve({json:async()=>({status:'success',
+          stock:[{symbol:'ASMIY',category:'Semiconductor',shares:220,cost:25.45,price:50},
+                 {symbol:'VOO',category:'IndexETF',shares:10,cost:400,price:600}],
+          expense:{},ledger:[],monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},
+          savings:[],bond:[],notices:[],hsa:null,retire:[],config:{},property:null,
+          rsu:{symbol:'ASMIY',vestedShares:220,costBasis:5600,avgCost:25.4545,
+               pendingShares:150,nextVest:{date:soon,shares:150},lots:[]},
+          stockHistory:[{ym:'2026-08',value:7000,invested:5000,net:0},
+                        {ym:'2026-09',value:7000,invested:5000,net:0}],
+          serverDate:'2026-09-05'})}); };
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window; await wait(500);
+  w.openDetail('stock');
+  const box=w.document.getElementById('rsuBox');
+  ok('股票页出现 RSU 栏', !!box && /RSU · ASMIY/.test(box.textContent));
+  ok('显示已归属市值 220×50 = 11,000', /11,000/.test(box.textContent), box.textContent.slice(0,60));
+  ok('显示成本基准', /5,600/.test(box.textContent));
+  ok('显示归属后涨跌 11000−5600 = 5,400', /5,400/.test(box.textContent));
+  ok('显示未归属股数与下次归属日', /150 股/.test(box.textContent) && /下次/.test(box.textContent));
+  ok('注明未归属不计入总额', /不计入总额/.test(box.textContent));
+  ok('曲线标明不含 RSU',
+     /不含 RSU/.test(w.document.getElementById('stockChart').textContent));
+}

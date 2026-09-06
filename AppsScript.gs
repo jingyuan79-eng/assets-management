@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V7.1  (2026-09-05)
+ * 资产驾驶舱 · Google Apps Script 后端  V7.2  (2026-09-05)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,18 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V7.2 2026-09-05  RSU 单独成表，并自动同步到 Stock
+ *   · 新增 RSU 表（脚本自建）：A:Grant B:Vest Date C:Shares D:Vest Price E:Note
+ *     一行一个归属批次，Vest Date 到了就算已归属
+ *   · 这张表是 RSU 的唯一数据源。Stock 表里 ASMIY 的股数与成本由 runRsu
+ *     自动写回（股数=已归属合计，成本=加权平均归属价），只动 C/D 两列，
+ *     E 列的 GOOGLEFINANCE 绝不碰。每次 vest 只需在 RSU 表填一行
+ *   · runRsu 在读 Stock 之前执行，使总额与界面一次就对上
+ *   · stockAccountValue 刻意剔除 RSU：曲线对照的是「自己投进去多少」，
+ *     RSU 一分钱没掏，算进去会凭空多出一截「收益」；且历史几年的数据
+ *     来自 Webull 账户本就不含 RSU，混进来两头对不上
+ *   · readAll 新增 rsu：已归属股数/成本基准/均价/未归属股数/下次归属
  *
  * V7.1 2026-09-05  曲线布局与区间切换（纯前端，后端未变）
  *   · 总额那一栏放回最上面，曲线移到它下面
@@ -1293,6 +1305,96 @@ function saveProperty(ss, data) {
            property: safeRun(function () { return readProperty(ss); }, null) };
 }
 
+// ==================== RSU（雇主股，按归属批次）====================
+// A:Grant  B:Vest Date  C:Shares  D:Vest Price  E:Note
+// 一行一个归属批次。Vest Date 到了就算已归属；未归属的 Vest Price 可留空。
+//
+// 这张表是 RSU 的唯一数据源。Stock 表里的 ASMIY 那一行由脚本自动写
+// （股数 = 已归属合计，成本 = 加权平均归属价），你不用手动同步两处。
+// 价格仍由 Stock 表 E 列的 GOOGLEFINANCE 提供，脚本不碰。
+//
+// 为什么 RSU 要从曲线里摘出去：曲线画的是「市值 vs 累计投入」，
+// 而 RSU 你一分钱没掏 —— 算进去会凭空多出一截「收益」，那是薪酬不是投资。
+var RSU_SYM = "ASMIY";                 // 雇主股代码；换雇主改这里
+var RSU_COL = { GRANT:1, DATE:2, SHARES:3, PRICE:4, NOTE:5 };
+var RSU_HEAD = ["Grant", "Vest Date", "Shares", "Vest Price", "Note"];
+
+function rsuSheet(ss) {
+  var sh = ss.getSheetByName("RSU");
+  if (!sh) {
+    sh = ss.insertSheet("RSU");
+    sh.getRange(1, 1, 1, RSU_HEAD.length).setValues([RSU_HEAD]);
+  }
+  return sh;
+}
+
+function readRsuLots(sh) {
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var v = sh.getRange(2, 1, last - 1, RSU_HEAD.length).getValues();
+  var out = [];
+  for (var i = 0; i < v.length; i++) {
+    var d = s2d(v[i][RSU_COL.DATE - 1]);
+    var sharesRaw = v[i][RSU_COL.SHARES - 1];
+    if (!d || isNaN(d.getTime())) continue;
+    if (sharesRaw === "" || sharesRaw == null) continue;
+    out.push({
+      row: i + 2,
+      grant: (v[i][RSU_COL.GRANT - 1] || "").toString().trim(),
+      date: d2s(d),
+      shares: parseFloat(sharesRaw) || 0,
+      price: parseFloat(v[i][RSU_COL.PRICE - 1]) || 0,
+      note: (v[i][RSU_COL.NOTE - 1] || "").toString().trim()
+    });
+  }
+  out.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  return out;
+}
+
+// 把已归属的股数和加权平均成本写回 Stock 表的 ASMIY 行。
+// 只动 C/D 两列 —— E 列是 GOOGLEFINANCE 公式，绝不能碰。
+function syncRsuToStock(ss, vestedShares, avgCost) {
+  var sh = ss.getSheetByName("Stock");
+  if (!sh) return false;
+  var row = stockRowOf(sh, RSU_SYM);
+  if (row < 0) return false;
+  var cur = sh.getRange(row, 3, 1, 2).getValues()[0];
+  var sameShares = Math.abs((parseFloat(cur[0]) || 0) - vestedShares) < 1e-6;
+  var sameCost = Math.abs((parseFloat(cur[1]) || 0) - avgCost) < 0.005;
+  if (sameShares && sameCost) return false;                 // 没变就不写
+  sh.getRange(row, 3, 1, 2).setValues([[vestedShares, avgCost]]);
+  return true;
+}
+
+function runRsu(ss) {
+  var sh = ss.getSheetByName("RSU");
+  if (!sh) return null;                    // 没建表就当没这回事，不影响其他模块
+  var lots = readRsuLots(sh);
+  if (!lots.length) return null;
+  var today = d2s(todaySv());
+  var vShares = 0, vCost = 0, pShares = 0, next = null;
+  for (var i = 0; i < lots.length; i++) {
+    if (lots[i].date <= today) {
+      vShares += lots[i].shares;
+      vCost += lots[i].shares * lots[i].price;
+    } else {
+      pShares += lots[i].shares;
+      if (!next) next = { date: lots[i].date, shares: lots[i].shares };
+    }
+  }
+  var avg = vShares > 0 ? Math.round(vCost / vShares * 10000) / 10000 : 0;
+  syncRsuToStock(ss, vShares, avg);
+  return {
+    symbol: RSU_SYM,
+    vestedShares: Math.round(vShares * 10000) / 10000,
+    costBasis: Math.round(vCost * 100) / 100,
+    avgCost: avg,
+    pendingShares: Math.round(pShares * 10000) / 10000,
+    nextVest: next,
+    lots: lots
+  };
+}
+
 // ==================== StockHistory（股票月度曲线）====================
 // 表结构（沿用你已经建好的那张，请把标签页命名为 StockHistory）：
 //   A:年月  B:月初account value  C:本月净入金  D:月末account value
@@ -1340,11 +1442,15 @@ function readStockHist(sh) {
   return out;
 }
 
-// 股票账户总值：各持仓 股数×现价，加上 Cash 行（金额借用 E 列）
+// 券商账户总值：各持仓 股数×现价，加上 Cash 行（金额借用 E 列）。
+// 刻意剔除 RSU —— 曲线对照的是「你自己投进去多少」，而 RSU 没有投入，
+// 算进去会凭空多出一截「收益」。而且历史那几年的数据来自 Webull 账户，
+// 本来就不含 RSU，混进来两头对不上。
 function stockAccountValue(stock) {
   var sum = 0;
   for (var i = 0; i < stock.length; i++) {
     var sym = (stock[i].symbol || "").toString().trim().toUpperCase();
+    if (sym === RSU_SYM) continue;
     if (sym === "CASH" || sym === "现金") { sum += parseFloat(stock[i].price) || 0; continue; }
     sum += (parseFloat(stock[i].shares) || 0) * (parseFloat(stock[i].price) || 0);
   }
@@ -1522,6 +1628,10 @@ function readAllInner(force) {
   safeRun(function () { configSheet(ss); }, null);
   safeRun(function () { propertySheet(ss); }, null);
 
+  // RSU 要在读 Stock 之前跑：它会把已归属股数写回 ASMIY 行，
+  // 这样下面读出来的就是同步后的数，总额和界面一次就对
+  var rsu = safeRun(function () { return runRsu(ss); }, null);
+
   // ---- Stock ----
   var sh = ss.getSheetByName("Stock");
   var sv = sh.getDataRange().getValues();
@@ -1633,6 +1743,7 @@ function readAllInner(force) {
            bond: safeRun(function () { return runBonds(ss, bs); }, []),
            hsa: safeRun(function () { return runHsa(ss, lv); }, null),
            config: safeRun(function () { return readConfig(ss); }, {}),
+           rsu: rsu,
            stockHistory: safeRun(function () {
              return stockHistOut(syncStockHist(ss, lv, stock));
            }, []),

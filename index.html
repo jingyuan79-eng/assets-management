@@ -440,7 +440,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V7.1';
+const APP_VER='V7.2';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -569,7 +569,7 @@ function saveSheetCache(data){
     localStorage.setItem(CACHE_KEY, JSON.stringify({
       ts: Date.now(),
       savings: data.savings, bond: data.bond, cash: data.cash, hsa: data.hsa,
-      property: data.property, stockHistory: data.stockHistory,
+      property: data.property, stockHistory: data.stockHistory, rsu: data.rsu,
       ledger: data.ledger, monthly: data.monthly,
       ledgerMonths: data.ledgerMonths, notices: data.notices
     }));
@@ -590,6 +590,7 @@ function loadSheetCache(){
   rebuildHsa(c.hsa);
   rebuildProperty(c.property);
   stockHistory = Array.isArray(c.stockHistory) ? c.stockHistory : [];
+  rsuInfo = c.rsu || null;
   rebuildMonthExpense();
   return true;
 }
@@ -631,6 +632,7 @@ function syncStockFromSheet(){
       syncConfigFromSheet(data.config);   // 设置以 Sheet 为准，先落到本地再往下走
       rebuildProperty(data.property);
       stockHistory = Array.isArray(data.stockHistory) ? data.stockHistory : [];
+      rsuInfo = data.rsu || null;
       cacheTs = 0;                // 拿到新数据，屏幕上不再是缓存
       if(data.serverDate) ASOF = data.serverDate;   // 服务器日期，不受本机时区影响
       saveSheetCache(data);       // 供下次打开垫底
@@ -1326,6 +1328,7 @@ function refreshOpenDetail(){
 // 只看市值分不出「涨了」还是「只是一直在投钱」，对比才有意义。
 // 不引图表库（项目无依赖无构建），直接手写 SVG。
 let stockHistory=[];
+let rsuInfo=null;
 let stockRange='all';                      // ytd / 1y / 3y / all
 const RANGE_LABEL={ytd:'YTD', y1:'1Y', y3:'3Y', all:'All'};
 function setStockRange(r){ stockRange=r; renderStockChart(); }
@@ -1398,7 +1401,8 @@ function renderStockChart(){
           Math.abs(pct).toFixed(1)+'%</span></div>'+
       '</div>'+
       '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:8px">'+
-        '市值 $'+fmt(Math.round(last.value))+' · 累计投入 $'+fmt(Math.round(last.invested))+'</div>'+
+        '券商账户 · 不含 RSU　市值 $'+fmt(Math.round(last.value))+
+        ' · 累计投入 $'+fmt(Math.round(last.invested))+'</div>'+
       '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:132px;display:block" '+
         'preserveAspectRatio="none">'+
         '<path d="'+band+'" fill="'+(gain>=0?'var(--stock-bg)':'#fdecec')+'" opacity=".85"/>'+
@@ -1419,6 +1423,45 @@ function renderStockChart(){
     '</div>';
 }
 
+// ==================== RSU 栏 ====================
+// 雇主股按归属批次记在 Sheet 的 RSU 表；Stock 表里 ASMIY 的股数和成本
+// 由后端自动同步，这里只负责显示。未归属的不算进总额 —— 没归属就不是你的钱，
+// 但按现价折算出来供参考。
+function renderRsu(){
+  const wrap=document.getElementById('rsuBox');
+  if(!wrap) return;
+  const r=rsuInfo;
+  if(!r || !(r.vestedShares>0 || r.pendingShares>0)){ wrap.innerHTML=''; return; }
+  const px=(findHolding(r.symbol)||{}).price||0;
+  const mv=Math.round(r.vestedShares*px);
+  const gain=Math.round(mv-r.costBasis);
+  const gc=gain>=0?'var(--pos)':'var(--neg)';
+  const pendVal=Math.round(r.pendingShares*px);
+  const row=(l,v,sub)=>'<div style="display:flex;justify-content:space-between;align-items:baseline;'+
+    'padding:7px 0;border-top:1px solid rgba(0,0,0,.05)">'+
+    '<div><div style="font-size:13px">'+l+'</div>'+
+    (sub?'<div style="font-size:11px;color:var(--ink-faint);margin-top:1px">'+sub+'</div>':'')+'</div>'+
+    '<div class="num" style="font-size:14px;font-weight:600;text-align:right">'+v+'</div></div>';
+  wrap.innerHTML=
+    '<div style="background:var(--card);border:1px solid var(--stock-ln);border-radius:var(--radius);'+
+      'padding:12px 14px;margin-bottom:14px">'+
+      '<div style="display:flex;align-items:baseline;justify-content:space-between">'+
+        '<div style="font-size:13px;font-weight:600">RSU · '+r.symbol+'</div>'+
+        '<div style="font-size:11px;color:var(--ink-faint)">雇主股 · 已计入股票总额</div>'+
+      '</div>'+
+      row('已归属', '$'+fmt(mv),
+          r.vestedShares+' 股 · 成本基准 $'+fmt(Math.round(r.costBasis))+
+          '（均价 $'+(r.avgCost||0).toFixed(2)+'）')+
+      row('归属后涨跌', '<span style="color:'+gc+'">'+(gain>=0?'+':'−')+'$'+fmt(Math.abs(gain))+'</span>',
+          '按现价 $'+px.toFixed(2)+' 计')+
+      (r.pendingShares>0
+        ? row('未归属', '<span style="color:var(--ink-faint)">$'+fmt(pendVal)+'</span>',
+              r.pendingShares+' 股 · 不计入总额'+
+              (r.nextVest?('　下次 '+r.nextVest.date.replace(/-/g,'/')+' 归属 '+r.nextVest.shares+' 股'):''))
+        : '')+
+    '</div>';
+}
+
 // ==================== 详情页 ====================
 function openDetail(k, keepScroll){
   if(k==='retire') roll401k();
@@ -1433,7 +1476,7 @@ function openDetail(k, keepScroll){
     '<div class="l" style="color:'+c.color+'">'+c.meta+'</div>'+
     '<div class="v num"><span class="cur">$</span>'+fmt(t)+'</div>'+
     '<div class="s">'+(ORDER.includes(k)?('占投资总额 '+(grand>0?(t/grand*100).toFixed(1):'0.0')+'%'):'税优账户 · 不计入投资总额')+'</div></div>'+
-    (k==='stock'?'<div id="stockChart"></div>':'');
+    (k==='stock'?'<div id="stockChart"></div><div id="rsuBox"></div>':'');
 
   c.groups.forEach(function(g,gi){
     if(k==='cash') return;
@@ -1503,7 +1546,7 @@ function openDetail(k, keepScroll){
   if(c.ledger)   html+='<div id="incomeWrap"></div>';
 
   body.innerHTML=html;
-  if(k==='stock')renderStockChart();
+  if(k==='stock'){ renderStockChart(); renderRsu(); }
   if(k==='cd')   renderCdAdd();
   if(k==='bond') renderBondAdd();
   if(k==='stock')renderStockAdd();
