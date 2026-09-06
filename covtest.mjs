@@ -24,7 +24,9 @@ function mkSheet(name,rows){return{_rows:rows,getName:()=>name,
    getValues(){const o=[];for(let i=0;i<nr;i++){const row=[];
      for(let j=0;j<nc;j++)row.push((self._rows[r-1+i]||[])[c-1+j]??"");o.push(row);}return o;},
    setValues(v){for(let i=0;i<nr;i++){const row=self._cell(r+i,c+nc-1);
-     for(let j=0;j<nc;j++)row[c-1+j]=v[i][j];}}};},
+     for(let j=0;j<nc;j++)row[c-1+j]=v[i][j];}},
+   clearContent(){for(let i=0;i<nr;i++){const row=self._cell(r+i,c+nc-1);
+     for(let j=0;j<nc;j++)row[c-1+j]="";}}};},
  appendRow(a){this._rows.push(a.slice());},deleteRow(r){this._rows.splice(r-1,1);}};}
 
 const pad=n=>String(n).padStart(2,'0');
@@ -1523,8 +1525,10 @@ console.log('\n— RSU 单独记 —');
     Ledger_monthly:mkSheet('Ledger_monthly',[])};
   const g=backend(noR);
   const rr=J(g.doGet({parameter:{}}));
-  ok('没有 RSU 表时返回 null，其他模块照常', rr.rsu===null && rr.status==='success');
-  ok('也不会把 Stock 的 ASMIY 清零', Number(noR.Stock._rows[1][2])===7,
+  // 现在读路径会把 RSU 表建出来并返回全 0（界面才好显示空编辑器）
+  ok('没有 RSU 表时自动建表，其他模块照常',
+     rr.status==='success' && rr.rsu && rr.rsu.vestedShares===0, JSON.stringify(rr.rsu));
+  ok('归属表为空时不改写 Stock 的 ASMIY', Number(noR.Stock._rows[1][2])===7,
      String(noR.Stock._rows[1][2]));
 
   // 前端展示
@@ -1555,4 +1559,111 @@ console.log('\n— RSU 单独记 —');
   ok('注明未归属不计入总额', /不计入总额/.test(box.textContent));
   ok('曲线标明不含 RSU',
      /不含 RSU/.test(w.document.getElementById('stockChart').textContent));
+}
+
+// ══════════════ 二十三、RSU 归属表在小程序里编辑 ══════════════
+// ASMIY 的下拉面板换成归属表编辑器：一行三格（日期/股数/成本）+ 加行。
+// 股数与成本由这张表推导，所以不再提供增持减持 —— 那会和归属表打架。
+console.log('\n— RSU 归属表编辑器 —');
+{
+  const RHEAD=['Grant','Vest Date','Shares','Vest Price','Note'];
+  // 后端：读路径要把表建出来（Property/Config 踩过同一个坑）
+  {
+    const tabs={Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price'],
+                  ['ASMIY','Semiconductor',0,0,50]]),
+      StockHistory:mkSheet('StockHistory',[['年月','月初account value','本月净入金','月末account value','本月投资收益','月收益率']]),
+      Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+      Anchor:mkSheet('Anchor',[['date','amount','note']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[])};
+    const {doGet}=backend(tabs);
+    const r=J(doGet({parameter:{}}));
+    ok('只读一次就把 RSU 表建出来', !!tabs.RSU);
+    ok('空表时返回 0 而不是 null（界面才好显示编辑器）',
+       r.rsu && r.rsu.vestedShares===0, JSON.stringify(r.rsu&&r.rsu.vestedShares));
+
+    // 整表覆盖式保存
+    const lots=[{date:fmt(daysAgo(300)),shares:100,price:20},
+                {date:fmt(daysAgo(30)),shares:120,price:30},
+                {date:fmt(daysAgo(-200)),shares:150,price:''}];
+    const sv=J(doGet({parameter:{action:'saveRsu', lots:JSON.stringify(lots)}}));
+    ok('保存后已归属 = 100+120', sv.rsu.vestedShares===220, String(sv.rsu.vestedShares));
+    ok('未归属 = 150', sv.rsu.pendingShares===150, String(sv.rsu.pendingShares));
+    ok('未归属的成本留空不算进基准', sv.rsu.costBasis===5600, String(sv.rsu.costBasis));
+    ok('写进了 RSU 表', tabs.RSU._rows.length===4, String(tabs.RSU._rows.length));
+    ok('同步写回 Stock 的股数', Number(tabs.Stock._rows[1][2])===220);
+
+    // 再保存一次（少一行）应整表覆盖，不残留旧行
+    J(doGet({parameter:{action:'saveRsu', lots:JSON.stringify(lots.slice(0,1))}}));
+    // 注意跳过表头：表头的 B 列写着「Vest Date」，是 truthy
+    const dataRows=()=>tabs.RSU._rows.slice(1).filter(r=>r[1]);
+    ok('整表覆盖，删掉的行不残留', dataRows().length===1, String(dataRows().length));
+    ok('删行后 Stock 股数跟着降到 100', Number(tabs.Stock._rows[1][2])===100);
+    // 没填日期的行直接丢掉
+    J(doGet({parameter:{action:'saveRsu', lots:JSON.stringify([{date:'',shares:9,price:1}])}}));
+    ok('没填日期的行不写入', dataRows().length===0, String(dataRows().length));
+  }
+
+  // 前端编辑器
+  const RSU={symbol:'ASMIY',vestedShares:220,costBasis:5600,avgCost:25.4545,
+             pendingShares:150,nextVest:{date:'2027-01-05',shares:150},
+             lots:[{date:'2025-08-01',shares:100,price:20},
+                   {date:'2026-02-15',shares:120,price:30},
+                   {date:'2027-01-05',shares:150,price:0}]};
+  const calls=[];
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=(u)=>{ const a=new URL(u).searchParams.get('action');
+        if(a){ calls.push(Object.fromEntries(new URL(u).searchParams));
+               return Promise.resolve({json:async()=>({status:'success',rsu:RSU})}); }
+        return Promise.resolve({json:async()=>({status:'success',
+          stock:[{symbol:'ASMIY',category:'Semiconductor',shares:220,cost:25.45,price:50},
+                 {symbol:'VOO',category:'IndexETF',shares:10,cost:400,price:600}],
+          expense:{},ledger:[],monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},
+          savings:[],bond:[],notices:[],hsa:null,retire:[],config:{},property:null,rsu:RSU,
+          stockHistory:[{ym:'2026-08',value:7000,invested:5000,net:0},
+                        {ym:'2026-09',value:7000,invested:5000,net:0}],
+          serverDate:'2026-09-05'})}); };
+      w.alert=(m)=>{ w.__alert=m; }; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window, d=w.document; await wait(500);
+  w.openDetail('stock');
+  w.showStockPanel(0,0);
+  const ed=d.getElementById('rsuEditor');
+  ok('点 ASMIY 打开的是归属表编辑器', !!ed);
+  ok('不再出现增持/减持', !/增持|减持/.test(d.getElementById('slot-0-0').textContent));
+  ok('已有三行归属记录', d.querySelectorAll('#rsuEditor input[id^=rsu-d-]').length===3,
+     String(d.querySelectorAll('#rsuEditor input[id^=rsu-d-]').length));
+  ok('一行三格：日期/股数/成本',
+     !!d.getElementById('rsu-d-0') && !!d.getElementById('rsu-s-0') && !!d.getElementById('rsu-p-0'));
+  ok('已归属/待归属有标记', /已归/.test(ed.textContent) && /待归/.test(ed.textContent));
+  ok('有「添加一行」', /添加一行/.test(ed.textContent));
+
+  w.rsuAddRow();
+  ok('点加行后多一行', d.querySelectorAll('#rsuEditor input[id^=rsu-d-]').length===4);
+  ok('加行不丢已填内容', d.getElementById('rsu-s-1').value==='120',
+     d.getElementById('rsu-s-1').value);
+  d.getElementById('rsu-d-3').value='2027-07-01';
+  d.getElementById('rsu-s-3').value='80';
+  w.rsuSave(); await wait(400);
+  const sent=calls.filter(c=>c.action==='saveRsu');
+  ok('保存发出 saveRsu', sent.length===1, `${sent.length} 次`);
+  const body=JSON.parse(sent[0].lots);
+  ok('提交四行', body.length===4, String(body.length));
+  ok('新加的那行内容正确',
+     body[3].date==='2027-07-01' && body[3].shares===80, JSON.stringify(body[3]));
+  ok('未归属的成本提交为空串，不写成 0', body[2].price==='', JSON.stringify(body[2].price));
+
+  // 删行（面板是 toggle，重开一次即可，连点两次会收起来）
+  w.showStockPanel(0,0);
+  w.rsuDelRow(0);
+  ok('删行后少一行', d.querySelectorAll('#rsuEditor input[id^=rsu-d-]').length===2,
+     String(d.querySelectorAll('#rsuEditor input[id^=rsu-d-]').length));
+
+  // 非 RSU 的股票面板不受影响
+  w.showStockPanel(1,0);
+  ok('普通股票仍是增持/减持面板',
+     /增持/.test(d.getElementById('slot-1-0').textContent) &&
+     !d.querySelector('#slot-1-0 #rsuEditor'));
 }

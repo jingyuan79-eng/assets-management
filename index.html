@@ -440,7 +440,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V7.2';
+const APP_VER='V7.3';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -1975,6 +1975,82 @@ function stockItem(){
   const g=DATA.stock.groups[curStock.gi];
   return g?g.holdings[curStock.hi]:null;
 }
+// ---- RSU 归属表编辑器：ASMIY 的下拉面板换成这个 ----
+// 一行三格：vest 日期 / 股数 / 成本(USD)。股数与成本由归属表推导，
+// 所以这里不再提供增持减持 —— 那会和归属表打架。
+let rsuDraft=null;
+function rsuOpenEditor(){
+  const r=rsuInfo||{lots:[]};
+  rsuDraft=(r.lots||[]).map(function(x){
+    return {date:x.date||'', shares:x.shares||'', price:(x.price===0?'':x.price)};
+  });
+  if(!rsuDraft.length) rsuDraft=[{date:'',shares:'',price:''}];
+}
+function rsuStash(){
+  if(!rsuDraft) return;
+  rsuDraft.forEach(function(row,i){
+    const d=document.getElementById('rsu-d-'+i), sh=document.getElementById('rsu-s-'+i),
+          p=document.getElementById('rsu-p-'+i);
+    if(d) row.date=d.value;
+    if(sh) row.shares=sh.value;
+    if(p) row.price=p.value;
+  });
+}
+function rsuAddRow(){ rsuStash(); rsuDraft.push({date:'',shares:'',price:''}); renderRsuEditor(); }
+function rsuDelRow(i){ rsuStash(); rsuDraft.splice(i,1);
+  if(!rsuDraft.length) rsuDraft=[{date:'',shares:'',price:''}]; renderRsuEditor(); }
+function renderRsuEditor(){
+  const wrap=document.getElementById('rsuEditor');
+  if(!wrap || !rsuDraft) return;
+  const today=fmtD(todayD());
+  const cell=(id,type,val,ph,extra)=>'<input id="'+id+'" type="'+type+'" value="'+
+    (val==null?'':String(val).replace(/"/g,'&quot;'))+'" placeholder="'+ph+'" '+
+    (extra||'')+' style="width:100%;box-sizing:border-box;padding:7px 6px;border:1px solid var(--line);'+
+    'border-radius:8px;font-size:12px;font-family:inherit;background:var(--card)">';
+  const rows=rsuDraft.map(function(row,i){
+    const vested=row.date && row.date<=today;
+    return '<div style="display:flex;gap:5px;align-items:center;margin-bottom:6px">'+
+      '<div style="flex:1.25">'+cell('rsu-d-'+i,'date',row.date,'')+'</div>'+
+      '<div style="flex:.8">'+cell('rsu-s-'+i,'number',row.shares,'股数','inputmode="decimal"')+'</div>'+
+      '<div style="flex:.9">'+cell('rsu-p-'+i,'number',row.price,'成本$','inputmode="decimal"')+'</div>'+
+      '<div onclick="rsuDelRow('+i+')" style="width:22px;text-align:center;cursor:pointer;'+
+        'color:var(--ink-faint);font-size:16px;line-height:1">×</div>'+
+      '<div style="width:26px;font-size:10px;color:'+(vested?'var(--pos)':'var(--ink-faint)')+'">'+
+        (row.date?(vested?'已归':'待归'):'')+'</div>'+
+    '</div>';
+  }).join('');
+  wrap.innerHTML=
+    '<div style="display:flex;gap:5px;font-size:10px;color:var(--ink-faint);margin-bottom:4px">'+
+      '<div style="flex:1.25">归属日期</div><div style="flex:.8">股数</div>'+
+      '<div style="flex:.9">成本 (USD)</div><div style="width:48px"></div></div>'+
+    rows+
+    '<div onclick="rsuAddRow()" class="addbox" style="margin:8px 0 10px;padding:9px;'+
+      'border-color:var(--stock-ln);background:var(--stock-bg)">'+
+      '<div class="plus" style="color:var(--stock);font-size:16px">+</div>'+
+      '<div class="lbl" style="font-size:11px">添加一行</div></div>'+
+    '<div class="btns">'+
+      '<button class="cancel" onclick="closeStockPanel()">取消</button>'+
+      '<button class="save" style="background:var(--stock)" onclick="rsuSave()">保存</button>'+
+    '</div>';
+}
+function rsuSave(){
+  rsuStash();
+  const lots=rsuDraft.filter(function(r){ return r.date && parseFloat(r.shares)>0; })
+    .map(function(r){ return {date:r.date, shares:parseFloat(r.shares)||0,
+                              price:(r.price===''||r.price==null)?'':(parseFloat(r.price)||0)}; });
+  if(!lots.length && rsuDraft.some(function(r){ return r.date||r.shares||r.price; })){
+    alert('每一行都要填归属日期和股数'); return;
+  }
+  closeStockPanel();
+  apiWrite({action:'saveRsu', lots:JSON.stringify(lots)}).then(function(res){
+    if(res && res.status==='success'){
+      if(res.rsu) rsuInfo=res.rsu;
+      return syncStockFromSheet();       // 股数与成本由后端写回 Stock，重拉一次拿准数
+    }
+    writeFailed(res,'保存 RSU');
+  });
+}
+
 function showStockPanel(gi,hi){
   document.querySelectorAll('.stock-slot').forEach(function(s){ if(s.id!=='slot-'+gi+'-'+hi) s.innerHTML=''; });
   curStock={gi,hi};
@@ -1983,6 +2059,20 @@ function showStockPanel(gi,hi){
   const wrap=document.getElementById('slot-'+gi+'-'+hi);
   if(!wrap) return;
   if(wrap.innerHTML){ wrap.innerHTML=''; return; }
+  // 雇主股：股数和成本由归属表推导，面板换成归属表编辑器
+  if(rsuInfo && normSym(it.sym)===normSym(rsuInfo.symbol)){
+    rsuOpenEditor();
+    wrap.innerHTML=
+      '<div class="editform" style="border-color:var(--stock-ln)">'+
+        '<div style="font-size:15px;font-weight:600;margin-bottom:2px">'+it.sym+' · 归属明细</div>'+
+        '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:10px">'+
+          '股数与成本由这张表算出，改完保存即可 · 现价 $'+(it.price||0).toFixed(2)+'</div>'+
+        '<div id="rsuEditor"></div>'+
+      '</div>';
+    renderRsuEditor();
+    wrap.scrollIntoView({behavior:'smooth',block:'center'});
+    return;
+  }
   wrap.innerHTML=
     '<div class="editform" style="border-color:var(--stock-ln)">'+
       '<div style="font-size:15px;font-weight:600;margin-bottom:4px">'+it.sym+'</div>'+

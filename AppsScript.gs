@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V7.2  (2026-09-05)
+ * 资产驾驶舱 · Google Apps Script 后端  V7.3  (2026-09-05)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,14 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V7.3 2026-09-05  修 RSU 表建不出来；归属表改成在小程序里编辑
+ *   · runRsu 原先发现表不存在就直接 return null，从不建表 —— 而打开
+ *     小程序是纯读，表永远不出现。改为调 rsuSheet(ss) 建表；空表返回
+ *     全 0 而不是 null，界面才好显示空的编辑器
+ *     （Property / Config 踩过同一个坑，这是第三次）
+ *   · 新增 action saveRsu：整表覆盖式保存，小程序改完一次写回。
+ *     没填归属日期的行直接丢弃
  *
  * V7.2 2026-09-05  RSU 单独成表，并自动同步到 Stock
  *   · 新增 RSU 表（脚本自建）：A:Grant B:Vest Date C:Shares D:Vest Price E:Note
@@ -233,6 +241,7 @@ function handleActionInner(data) {
     case "updateHsa":    return updateHsa(ss, data);
     case "saveConfig":   return saveConfig(ss, data);
     case "saveProperty": return saveProperty(ss, data);
+    case "saveRsu":      return saveRsu(ss, data);
 
     case "updateStock": return updateStock(ss, data);
     case "addStock":    return addStock(ss, data);
@@ -1366,11 +1375,37 @@ function syncRsuToStock(ss, vestedShares, avgCost) {
   return true;
 }
 
+// 小程序里改完整张归属表后整体覆盖。lots 是 JSON 数组：
+// [{date:"2026-02-15", shares:120, price:30, grant:"", note:""}, ...]
+function saveRsu(ss, data) {
+  var lots;
+  try { lots = JSON.parse(data.lots || "[]"); }
+  catch (e) { return { status: "error", message: "RSU 数据格式不对" }; }
+  var sh = rsuSheet(ss);
+  var last = sh.getLastRow();
+  if (last > 1) sh.getRange(2, 1, last - 1, RSU_HEAD.length).clearContent();
+  var rows = [];
+  for (var i = 0; i < lots.length; i++) {
+    var L = lots[i] || {};
+    var d = (L.date || "").toString().trim();
+    if (!d) continue;                                  // 没填日期的行直接丢掉
+    rows.push([(L.grant || "").toString(), d,
+               parseFloat(L.shares) || 0,
+               (L.price === "" || L.price == null) ? "" : (parseFloat(L.price) || 0),
+               (L.note || "").toString()]);
+  }
+  if (rows.length) sh.getRange(2, 1, rows.length, RSU_HEAD.length).setValues(rows);
+  return { status: "success", type: "saveRsu",
+           rsu: safeRun(function () { return runRsu(ss); }, null) };
+}
+
 function runRsu(ss) {
-  var sh = ss.getSheetByName("RSU");
-  if (!sh) return null;                    // 没建表就当没这回事，不影响其他模块
+  // 建表要放在读路径里：只打开小程序是纯读，表不会自己出现，
+  // 你在 Sheet 里看不到也就无从填写（Property / Config 踩过同一个坑）
+  var sh = rsuSheet(ss);
   var lots = readRsuLots(sh);
-  if (!lots.length) return null;
+  if (!lots.length) return { symbol: RSU_SYM, vestedShares: 0, costBasis: 0, avgCost: 0,
+                             pendingShares: 0, nextVest: null, lots: [] };
   var today = d2s(todaySv());
   var vShares = 0, vCost = 0, pShares = 0, next = null;
   for (var i = 0; i < lots.length; i++) {
