@@ -1550,12 +1550,15 @@ console.log('\n— RSU 单独记 —');
       w.Element.prototype.scrollIntoView=function(){}; }});
   const w=dom.window; await wait(500);
   w.openDetail('stock');
-  const box=w.document.getElementById('rsuBox');
-  ok('股票页出现 RSU 栏', !!box && /RSU · ASMIY/.test(box.textContent));
-  ok('显示已归属市值 220×50 = 11,000', /11,000/.test(box.textContent), box.textContent.slice(0,60));
-  ok('显示成本基准', /5,600/.test(box.textContent));
-  ok('显示归属后涨跌 11000−5600 = 5,400', /5,400/.test(box.textContent));
-  ok('显示未归属股数与下次归属日', /150 股/.test(box.textContent) && /下次/.test(box.textContent));
+  // 独立的 RSU 汇总框已去掉：信息本来就重复，改到点开 ASMIY 的面板里看
+  ok('不再有独立的 RSU 汇总框', !w.document.getElementById('rsuBox'));
+  w.showStockPanel(0,0);
+  const box=w.document.getElementById('slot-0-0');
+  ok('面板小字与其他股票一致（已归属 RSU · 股数 · 均成本 · 现价）',
+     /已归属 RSU/.test(box.textContent) && /均成本/.test(box.textContent) &&
+     /现价/.test(box.textContent), box.textContent.slice(0,70));
+  ok('面板里显示未归属股数与下次归属日',
+     /150 股/.test(box.textContent) && /下次/.test(box.textContent));
   ok('注明未归属不计入总额', /不计入总额/.test(box.textContent));
   ok('曲线标明不含 RSU',
      /不含 RSU/.test(w.document.getElementById('stockChart').textContent));
@@ -1666,4 +1669,66 @@ console.log('\n— RSU 归属表编辑器 —');
   ok('普通股票仍是增持/减持面板',
      /增持/.test(d.getElementById('slot-1-0').textContent) &&
      !d.querySelector('#slot-1-0 #rsuEditor'));
+}
+
+// ══════════════ 二十四、分类调整 / 排序 / 右滑返回 ══════════════
+console.log('\n— 分类、排序、返回手势 —');
+{
+  const rows=[{symbol:'NVDA',category:'Semiconductor',shares:10,cost:100,price:200},   // 2000
+              {symbol:'VOO',category:'IndexETF',shares:10,cost:100,price:600},          // 6000
+              {symbol:'AVUV',category:'Value ETF',shares:10,cost:50,price:90},          // 900
+              {symbol:'PPA',category:'Other ETF',shares:10,cost:50,price:120},          // 1200
+              {symbol:'COST',category:'Tech/AI',shares:1,cost:900,price:950},           // 旧分类
+              {symbol:'VEA',category:'International ETF',shares:10,cost:40,price:55}];  // 550
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=(u)=>{ const a=new URL(u).searchParams.get('action');
+        if(a) return Promise.resolve({json:async()=>({status:'success'})});
+        return Promise.resolve({json:async()=>({status:'success',stock:rows,expense:{},ledger:[],
+          monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},savings:[],bond:[],
+          notices:[],hsa:null,retire:[],config:{},property:null,rsu:null,
+          stockHistory:[],serverDate:'2026-09-08'})}); };
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window, d=w.document; await wait(500);
+  w.openDetail('stock');
+  const cats=[].map.call(d.querySelectorAll('#d-body .stkcat'),
+    e=>e.childNodes[0].textContent.trim());
+  ok('半导体', cats.includes('半导体'), cats.join(' | '));
+  ok('美股核心仓', cats.includes('美股核心仓'));
+  ok('因子 ETF', cats.includes('因子 ETF'));
+  ok('美股行业/主题 ETF', cats.includes('美股行业/主题 ETF'));
+  ok('国际股票', cats.includes('国际股票'));
+  ok('旧分类 Tech/AI 归到美国个股，不掉进兜底类',
+     w.eval("CAT_MAP[LEGACY_CAT['Tech/AI']]")==='美国个股');
+  ok('按金额从高到低排（核心仓 6000 在半导体 2000 之前）',
+     cats.indexOf('美股核心仓')<cats.indexOf('半导体'), cats.join(' > '));
+  ok('最小的国际股票排在最后', cats[cats.length-1]==='国际股票', cats[cats.length-1]);
+  const subs=[].map.call(d.querySelectorAll('#d-body .stksub'),e=>e.textContent.trim());
+  ok('小字跟着改', subs.includes('美股大盘指数') && subs.includes('美股价值'), subs.join(' | '));
+
+  // 点开个股要定位到正确的分组（排序后 gi 不能错位）
+  const semiIdx=cats.indexOf('半导体');
+  ok('排序后点个股仍定位正确',
+     (function(){ w.openDetail('stock');
+       const row=d.querySelectorAll('#d-body .stkgroup')[semiIdx].querySelector('.row');
+       row.onclick(); const slot=d.querySelector('.stock-slot:not(:empty)');
+       return !!slot && /NVDA/.test(slot.textContent); })());
+
+  // 右滑返回
+  ok('提供右滑返回', typeof w.goBackOne==='function');
+  w.openDetail('stock');
+  w.goBackOne();
+  ok('右滑从详情页回到总览',
+     d.getElementById('scr-overview').classList.contains('active'));
+  w.goBackOne();
+  ok('已在总览时再滑不出事', d.getElementById('scr-overview').classList.contains('active'));
+
+  // 非激活屏不再被拉伸（iOS 上会让滚动区域残留上一页长度）
+  const css=html.slice(html.indexOf('.screen{'), html.indexOf('.screen.active'));
+  ok('非激活屏不写 bottom:0', !/inset:0/.test(css), css.slice(0,60));
+  ok('min-height 只给激活屏', /\.screen\.active\{[^}]*min-height:100%/.test(html));
+
+  // 曲线下面的 RSU 汇总框已去掉
+  ok('不再有独立的 RSU 汇总框', !d.getElementById('rsuBox'));
 }

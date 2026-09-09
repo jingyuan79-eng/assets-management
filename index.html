@@ -28,12 +28,16 @@
     font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
     -webkit-font-smoothing:antialiased;overflow-x:hidden;}
   .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum";}
-  .screen{position:absolute;inset:0;min-height:100%;
+  /* 非激活屏用 absolute 脱离文档流。刻意不写 bottom:0，min-height 也只给
+     激活的那一屏 —— 否则非激活屏会被拉伸到容器的完整高度，在 iOS 上会让
+     滚动区域残留上一页的长度（从长页面返回后主页显得变长了）。 */
+  .screen{position:absolute;top:0;left:0;right:0;min-height:0;
     padding:calc(env(safe-area-inset-top) + 8px) 16px calc(env(safe-area-inset-bottom) + 40px);
-    max-width:520px;margin:0 auto;left:0;right:0;
+    max-width:520px;margin:0 auto;
     opacity:0;transform:translateX(24px);pointer-events:none;
     transition:opacity .22s ease,transform .22s ease;}
-  .screen.active{opacity:1;transform:none;pointer-events:auto;position:relative;}
+  .screen.active{opacity:1;transform:none;pointer-events:auto;
+    position:relative;min-height:100%;}
   .nav{display:flex;align-items:center;gap:10px;margin:6px 2px 18px;min-height:28px;}
   .nav .back{display:flex;align-items:center;gap:4px;font-size:15px;
     background:none;border:none;cursor:pointer;padding:4px 6px 4px 0;font-weight:500;}
@@ -318,21 +322,23 @@ const ALL = ORDER.concat(ORDER_TAX);
 
 // ==================== 股票分类（唯一数据源）====================
 const STOCK_TAXONOMY = [
-  {sheet:'Semiconductor',     cat:'半导体 / AI 硬件', sub:'最大集中风险', semi:true},
-  {sheet:'IndexETF',          cat:'大盘指数 ETF',    sub:'标普500核心'},
-  {sheet:'Tech/AI',           cat:'其他科技个股',    sub:''},
-  {sheet:'Consumer',          cat:'消费',            sub:''},
-  {sheet:'医疗',              cat:'医疗 ETF',        sub:'防御·低AI相关'},
-  {sheet:'International ETF', cat:'国际股票 ETF',    sub:'非美分散'},
-  {sheet:'Value ETF',         cat:'美股小盘 ETF',    sub:'小盘价值'},
-  {sheet:'Other ETF',         cat:'其他主题 ETF',    sub:'国防/能源'},
-  {sheet:'Gold.coin',         cat:'黄金 · 加密 · 现金', sub:'保险与待投资子弹'}
-];
+  {sheet:'Semiconductor',     cat:'半导体',             sub:'半导体 · AI 硬件', semi:true},
+  {sheet:'IndexETF',          cat:'美股核心仓',          sub:'美股大盘指数'},
+  {sheet:'Value ETF',         cat:'因子 ETF',           sub:'美股价值'},
+  {sheet:'Other ETF',         cat:'美股行业/主题 ETF',   sub:'消费 · 医疗 · 能源 · 国防'},
+  {sheet:'None semi stock',   cat:'美国个股',            sub:'非半导体个股'},
+  {sheet:'International ETF', cat:'国际股票',            sub:'非美分散'},
+  {sheet:'Gold.coin',         cat:'黄金 · 加密 · 现金',   sub:'保险与待投资子弹'}
+]
 const CAT_MAP = {}; STOCK_TAXONOMY.forEach(function(t){ CAT_MAP[t.sheet]=t.cat; });
+// Sheet 里可能还留着旧的分类值，先映射到新类，免得持仓掉进兜底类
+const LEGACY_CAT = {'Tech/AI':'None semi stock', 'Consumer':'None semi stock',
+                    '医疗':'Other ETF', 'NoneSemiStock':'None semi stock',
+                    'OtherETF':'Other ETF', 'ValueETF':'Value ETF'};
 const GROUP_META = STOCK_TAXONOMY.map(function(t){ return {cat:t.cat, sub:t.sub, semi:t.semi||false}; });
 const STOCK_CATS = GROUP_META.map(function(g){ return g.cat; });
 const GOLD_CAT = '黄金 · 加密 · 现金';
-const THEME_CAT = '其他主题 ETF';
+const THEME_CAT = '美股行业/主题 ETF';
 
 // ASMI 在 Sheet / GOOGLEFINANCE 中统一写作 ASMIY
 function normSym(s){
@@ -440,7 +446,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V7.3';
+const APP_VER='V7.4';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -687,7 +693,7 @@ function rebuildStockGroups(rows){
     }
 
     const rawCat = (row.category||'').toString().trim();
-    const appCat = CAT_MAP[rawCat] || THEME_CAT;
+    const appCat = CAT_MAP[rawCat] || CAT_MAP[LEGACY_CAT[rawCat]] || THEME_CAT;
     const g = groupByCat[appCat] || groupByCat[THEME_CAT];
     const shares = parseFloat(row.shares)||0;
     const cost = parseFloat(row.cost)||0;
@@ -1476,12 +1482,16 @@ function openDetail(k, keepScroll){
     '<div class="l" style="color:'+c.color+'">'+c.meta+'</div>'+
     '<div class="v num"><span class="cur">$</span>'+fmt(t)+'</div>'+
     '<div class="s">'+(ORDER.includes(k)?('占投资总额 '+(grand>0?(t/grand*100).toFixed(1):'0.0')+'%'):'税优账户 · 不计入投资总额')+'</div></div>'+
-    (k==='stock'?'<div id="stockChart"></div><div id="rsuBox"></div>':'');
+    (k==='stock'?'<div id="stockChart"></div>':'');
 
-  c.groups.forEach(function(g,gi){
+  // 按金额从高到低排；gi 仍取原始下标，否则点开个股会定位到错的分组
+  var ordered=c.groups.map(function(g,gi){ return {g:g, gi:gi, t:sumH(g)}; })
+    .filter(function(o){ return o.g.holdings && o.g.holdings.length; })
+    .sort(function(a,b){ return b.t-a.t; });
+  ordered.forEach(function(o){
+    var g=o.g, gi=o.gi;
     if(k==='cash') return;
-    if(!g.holdings || g.holdings.length===0) return;
-    var gt=sumH(g);
+    var gt=o.t;
     var accent = g.semi?'var(--neg)':c.color;
 
     var rowsHtml = g.holdings.map(function(hh,hi){
@@ -1546,7 +1556,7 @@ function openDetail(k, keepScroll){
   if(c.ledger)   html+='<div id="incomeWrap"></div>';
 
   body.innerHTML=html;
-  if(k==='stock'){ renderStockChart(); renderRsu(); }
+  if(k==='stock')renderStockChart();
   if(k==='cd')   renderCdAdd();
   if(k==='bond') renderBondAdd();
   if(k==='stock')renderStockAdd();
@@ -2064,9 +2074,17 @@ function showStockPanel(gi,hi){
     rsuOpenEditor();
     wrap.innerHTML=
       '<div class="editform" style="border-color:var(--stock-ln)">'+
-        '<div style="font-size:15px;font-weight:600;margin-bottom:2px">'+it.sym+' · 归属明细</div>'+
-        '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:10px">'+
-          '股数与成本由这张表算出，改完保存即可 · 现价 $'+(it.price||0).toFixed(2)+'</div>'+
+        '<div style="font-size:15px;font-weight:600;margin-bottom:4px">'+it.sym+'</div>'+
+        '<div style="font-size:12px;color:var(--ink-2);margin-bottom:4px">已归属 RSU · '+
+          (it.shares%1?it.shares.toFixed(3):it.shares)+'股 · 均成本 $'+(it.cost||0).toFixed(2)+
+          ' · 现价 $'+(it.price||0).toFixed(2)+
+          ' · 利润 '+(prof>=0?'+':'')+prof.toFixed(1)+'%</div>'+
+        (rsuInfo && rsuInfo.pendingShares>0
+          ? '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:10px">未归属 '+
+            rsuInfo.pendingShares+' 股 · 不计入总额'+
+            (rsuInfo.nextVest?('　下次 '+rsuInfo.nextVest.date.replace(/-/g,'/')+
+              ' 归属 '+rsuInfo.nextVest.shares+' 股'):'')+'</div>'
+          : '<div style="height:6px"></div>')+
         '<div id="rsuEditor"></div>'+
       '</div>';
     renderRsuEditor();
@@ -3251,6 +3269,35 @@ function recalcHistory(){
 }
 
 // ==================== 导航 ====================
+// ---- 右滑返回 ----
+// 从屏幕左侧起手、明显向右、且横向位移远大于纵向（避免和上下滚动打架）时，
+// 视为返回。只在子页面生效，主页本身没有上级。
+(function(){
+  let sx=0, sy=0, tracking=false;
+  document.addEventListener('touchstart', function(e){
+    if(e.touches.length!==1) return;
+    const t=e.touches[0];
+    tracking = t.clientX < 40;               // 只认从左边缘起手，避免误触
+    sx=t.clientX; sy=t.clientY;
+  }, {passive:true});
+  document.addEventListener('touchend', function(e){
+    if(!tracking) return;
+    tracking=false;
+    const t=e.changedTouches[0];
+    const dx=t.clientX-sx, dy=Math.abs(t.clientY-sy);
+    if(dx>60 && dx>dy*2) goBackOne();
+  }, {passive:true});
+})();
+// 当前在哪个子页，就退回它的上一级
+function goBackOne(){
+  const cur=document.querySelector('.screen.active');
+  if(!cur || cur.id==='scr-overview') return;
+  if(cur.id==='scr-detail' && currentDetailKey==='cash' && expenseDrill){
+    closeExpenseDrill(); return;             // 支出明细页先退回支出列表
+  }
+  go('overview');
+}
+
 function go(id){
   document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
   document.getElementById('scr-'+id).classList.add('active');

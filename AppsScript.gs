@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V7.3  (2026-09-05)
+ * 资产驾驶舱 · Google Apps Script 后端  V7.4  (2026-09-08)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,8 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V7.4 2026-09-08  股票分类调整等（纯前端，后端未变）
  *
  * V7.3 2026-09-05  修 RSU 表建不出来；归属表改成在小程序里编辑
  *   · runRsu 原先发现表不存在就直接 return null，从不建表 —— 而打开
