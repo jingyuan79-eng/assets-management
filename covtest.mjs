@@ -1732,3 +1732,84 @@ console.log('\n— 分类、排序、返回手势 —');
   // 曲线下面的 RSU 汇总框已去掉
   ok('不再有独立的 RSU 汇总框', !d.getElementById('rsuBox'));
 }
+
+// ══════════════ 二十五、转账：股票账户 → Chase ══════════════
+// 从券商把钱转回 Chase：券商现金减、Chase 加，记「Redeem · 券商」——
+// 加现金但不算收入（和国债到期本金同一类），净收入不会被抬高。
+console.log('\n— 转账：股票账户 → Chase —');
+{
+  const calls=[];
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+    beforeParse(w){ w.localStorage.clear();
+      w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+        if(a){ calls.push(Object.fromEntries(url.searchParams));
+               return Promise.resolve({json:async()=>({status:'success',row:77})}); }
+        return Promise.resolve({json:async()=>({status:'success',
+          stock:[{symbol:'VOO',category:'IndexETF',shares:10,cost:400,price:600},
+                 {symbol:'Cash',category:'Gold.coin.cash',shares:'',cost:'',price:5000}],
+          expense:{},ledger:[],monthly:{},ledgerMonths:[],
+          cash:{balance:10000,anchorDate:'2026-09-01',anchorAmount:10000,hasAnchor:true,bookStart:'2026-09-01'},
+          savings:[{id:'s1',name:'OS-9250',type:'OS',balance:20000,rate:0.034,lastPost:'2026-09-01',
+                    nextUpdate:'',maturity:'',status:'active'}],
+          bond:[],notices:[],hsa:null,retire:[],config:{},property:null,rsu:null,
+          stockHistory:[],serverDate:'2026-09-10'})}); };
+      w.alert=(m)=>{ w.__alert=m; }; w.confirm=()=>true; w.scrollTo=()=>{};
+      w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window, d=w.document; await wait(500);
+  w.openTransfer();
+  const srcOpts=[].map.call(d.querySelectorAll('#x-src option'),o=>o.value);
+  const tgtOpts=[].map.call(d.querySelectorAll('#x-tgt option'),o=>o.value);
+  ok('From 里有股票账户', srcOpts.includes('broker'), srcOpts.join(','));
+  ok('To 里有 Checking - Chase', tgtOpts.includes('chase'), tgtOpts.join(','));
+
+  const broker0=w.eval("brokerCashItem().mv"), cash0=w.eval("cashInfo.balance");
+  d.getElementById('x-src').value='broker';
+  d.getElementById('x-tgt').value='chase';
+  d.getElementById('x-amt').value='1500';
+  w.submitOneTime(); await wait(400);
+  ok('券商现金减 1500', w.eval("brokerCashItem().mv")===broker0-1500, String(w.eval("brokerCashItem().mv")));
+  ok('Chase 流动现金加 1500', w.eval("cashInfo.balance")===cash0+1500, String(w.eval("cashInfo.balance")));
+  const led=calls.find(c=>c.action==='addLedger');
+  ok('Ledger 记一笔 Redeem · 券商', led && led.category==='Redeem · 券商' && +led.amount===1500,
+     JSON.stringify(led));
+  ok('券商现金按增量写回', calls.some(c=>c.action==='adjustCash' && +c.delta===-1500));
+  ok('不算收入（Redeem 不进 income）', w.eval("catKind('Redeem · 券商')")==='redeem');
+
+  // 同一账户互转要拦下并提示，而不是静默没反应
+  w.__alert=null; calls.length=0;
+  d.getElementById('x-src').value='broker';
+  d.getElementById('x-tgt').value='broker';
+  d.getElementById('x-amt').value='100';
+  w.submitOneTime(); await wait(200);
+  ok('同账户互转被拦下并提示', /同一个账户/.test(w.__alert||''), String(w.__alert));
+  ok('且不发任何写请求', calls.length===0, `${calls.length} 次`);
+
+  // Marcus → Chase 顺带也通了
+  calls.length=0;
+  d.getElementById('x-src').value='marcus';
+  d.getElementById('x-tgt').value='chase';
+  d.getElementById('x-amt').value='800';
+  w.submitOneTime(); await wait(400);
+  ok('Marcus → Chase 记 Redeem · Marcus',
+     calls.some(c=>c.action==='addLedger' && c.category==='Redeem · Marcus' && +c.amount===800));
+  ok('并从 Marcus 扣款', calls.some(c=>c.action==='adjustSaving' && +c.delta===-800));
+
+  // 后端：StockHistory 的净入金要扣掉从券商转出的钱
+  const T=new Date(); const ym=`${T.getFullYear()}-${pad(T.getMonth()+1)}`;
+  const SH=mkSheet('StockHistory',[['年月','月初account value','本月净入金','月末account value','本月投资收益','月收益率']]);
+  const tabs={StockHistory:SH,
+    Ledger:mkSheet('Ledger',[['Date','category','amount','note','key'],
+      [`${ym}-02`,'Transfer · 券商',3000,'',''],
+      [`${ym}-05`,'Redeem · 券商',1200,'',''],
+      [`${ym}-06`,'Redeem · 国债',999,'','']]),       // 国债回流与券商无关
+    Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price'],['VOO','IndexETF',10,400,600]]),
+    Anchor:mkSheet('Anchor',[['date','amount','note']]),
+    Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+    Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+    Ledger_monthly:mkSheet('Ledger_monthly',[])};
+  const {doGet}=backend(tabs);
+  const h=J(doGet({parameter:{}})).stockHistory;
+  const cur=h[h.length-1];
+  ok('本月净入金 = 转入 3000 − 转出 1200 = 1800', cur.net===1800, String(cur.net));
+  ok('国债回流不算进券商净入金', cur.net===1800);
+}

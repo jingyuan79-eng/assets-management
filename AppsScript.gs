@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V7.4  (2026-09-08)
+ * 资产驾驶舱 · Google Apps Script 后端  V7.5  (2026-09-10)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,10 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V7.5 2026-09-10  转账支持「股票账户 → Chase」
+ *   · brokerInflow 改为净额：Transfer · 券商 记正，Redeem · 券商 记负。
+ *     否则从券商转出的钱不会从累计投入里扣掉，曲线收益被低估
  *
  * V7.4 2026-09-08  股票分类调整等（纯前端，后端未变）
  *
@@ -1500,10 +1504,17 @@ function brokerInflow(lv, ym) {
   for (var i = 1; i < lv.length; i++) {
     if (!lv[i][0]) continue;
     var cat = (lv[i][1] || "").toString().trim();
-    if (cat.indexOf("Transfer") !== 0 || cat.indexOf("券商") < 0) continue;
+    // 净入金 = 转入券商 − 从券商转出。转出记作「Redeem · 券商」，
+    // 不扣掉的话累计投入会虚高、曲线上的收益被低估。
+    var sign = 0;
+    if (cat.indexOf("券商") >= 0) {
+      if (cat.indexOf("Transfer") === 0) sign = 1;
+      else if (cat.indexOf("Redeem") === 0) sign = -1;
+    }
+    if (!sign) continue;
     var d = s2d(lv[i][0]); if (!d) continue;
     if (d2s(d).slice(0, 7) !== ym) continue;
-    sum += parseFloat(lv[i][2]) || 0;
+    sum += sign * (parseFloat(lv[i][2]) || 0);
   }
   return Math.round(sum * 100) / 100;
 }

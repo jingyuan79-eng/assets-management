@@ -446,7 +446,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V7.4';
+const APP_VER='V7.5';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -2630,7 +2630,7 @@ function brokerCashItem(){
   return null;
 }
 function chaseItem(){ return DATA.cash.groups[0].holdings.find(x=>x.sym==='Chase'); }
-function getSource(key){ return key==='chase'?chaseItem():key==='marcus'?marcusItem():null; }
+function getSource(key){ return key==='chase'?chaseItem():key==='marcus'?marcusItem():key==='broker'?brokerCashItem():null; }
 function sourceBalance(key){
   const it=getSource(key);
   return it?(it.mv||0):0;
@@ -2656,10 +2656,25 @@ function deductSource(key, amt, tgtKey, dateStr, dedupeKey){
     const it=marcusItem(); if(!it) return;
     it.mv=Math.max(0,Math.round((it.mv||0)-amt));
     apiWrite({action:'adjustSaving', id:it.id, delta:-Math.round(amt)}).then(refreshFromSheet);
+  }else if(key==='broker'){
+    adjustBrokerCash(-amt);
   }
 }
-function addToTarget(key, amt){
-  if(key==='broker'){
+function addToTarget(key, amt, srcKey, dateStr, dedupeKey){
+  if(key==='chase'){
+    // 钱从自己的其他账户回到 Chase：加流动现金，但不是收入。
+    // 用 Redeem 前缀（本金回流），和国债到期本金同一类，净收入不会被抬高。
+    const ds=dateStr||fmtD(todayD());
+    const cat='Redeem · '+transferLabel(srcKey);
+    const tmp={row:-Date.now()-1, date:ds, category:cat, amount:Math.round(amt*100)/100,
+               note:'', key:dedupeKey||''};
+    ledgerRows.push(tmp);
+    applyCashDelta(signedOf(tmp));
+    apiWrite(dedupeKey
+      ? {action:'autoLedger', key:dedupeKey, date:ds, category:cat, amount:tmp.amount, note:'定期转账'}
+      : {action:'addLedger', date:ds, category:cat, amount:tmp.amount, note:''}
+    ).then(function(res){ if(res&&res.status==='success') tmp.row=res.row; });
+  }else if(key==='broker'){
     adjustBrokerCash(amt);
   }else if(key==='mortgage'){
     PROPERTY.loan=Math.max(0, Math.round((PROPERTY.loan!=null?PROPERTY.loan:amortizeNow())-amt));
@@ -2675,7 +2690,7 @@ function doTransfer(srcKey, tgtKey, amt, dateStr, dedupeKey){
   if(!(amt>0)) return;
   if(srcKey===tgtKey) return;
   deductSource(srcKey, amt, tgtKey, dateStr, dedupeKey);
-  addToTarget(tgtKey, amt);
+  addToTarget(tgtKey, amt, srcKey, dateStr, dedupeKey);
 }
 
 // ==================== 定期转账 ====================
@@ -2735,8 +2750,8 @@ function runRecurring(){
 }
 
 // ==================== 转账页 ====================
-const SRC_OPTS=[{k:'chase',n:'Checking - Chase'},{k:'marcus',n:'Marcus OS-9250'}];
-const TGT_OPTS=[{k:'broker',n:'股票账户现金'},{k:'mortgage',n:'房贷（还款）'},{k:'marcus',n:'Marcus 活期 OS'}];
+const SRC_OPTS=[{k:'chase',n:'Checking - Chase'},{k:'marcus',n:'Marcus OS-9250'},{k:'broker',n:'股票账户现金'}];
+const TGT_OPTS=[{k:'broker',n:'股票账户现金'},{k:'chase',n:'Checking - Chase'},{k:'mortgage',n:'房贷（还款）'},{k:'marcus',n:'Marcus 活期 OS'}];
 function optName(list,k){ const o=list.find(x=>x.k===k); return o?o.n:k; }
 function openTransfer(){ renderTransfer(); go('transfer'); }
 // 下一次自动执行的日期
@@ -2819,7 +2834,8 @@ function submitOneTime(){
   const tgt=document.getElementById('x-tgt').value;
   const amt=parseFloat(document.getElementById('x-amt').value);
   if(!(amt>0)){ alert('请输入金额'); return; }
-  if(tgt==='broker' && !syncOk){
+  if(src===tgt){ alert('转出和转入不能是同一个账户'); return; }
+  if((tgt==='broker'||src==='broker') && !syncOk){
     if(!confirm('当前与 Google Sheet 同步失败。\n此时转入券商现金可能在下次同步时被覆盖。\n仍要继续吗？')) return;
   }
   doTransfer(src,tgt,amt);
@@ -2834,6 +2850,7 @@ function submitRecurring(){
   const freq=document.getElementById('x-freq').value;
   const start=document.getElementById('x-start').value;
   if(!(amt>0)){ alert('请输入金额'); return; }
+  if(src===tgt){ alert('转出和转入不能是同一个账户'); return; }
   if(!start){ alert('请选择首次转账日'); return; }
   const list=loadRecurring();
   // lastRun 留空：首次转账日到了就执行；设在未来则等到那天
