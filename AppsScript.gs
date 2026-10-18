@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V7.5  (2026-09-10)
+ * 资产驾驶舱 · Google Apps Script 后端  V8.0  (2026-10-17)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,13 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V8.0 2026-10-17  房产模块重做：每期还款由房产模块驱动
+ *   · Property 表新增三行：payDay（每月扣款日）、autoPay（1=每期自动记账）、
+ *     autoFrom（从哪天起自动记）。表里没有这几行时 saveProperty 会自动追加
+ *   · propBalanceNow 改为按扣款日逐期推进：只算锚点日期之后的扣款日。
+ *     原来按自然月数计步，扣款日在月中时会提前半个月把这一期算进去。
+ *     前端 mtgSchedule 是同一套算法
  *
  * V7.5 2026-09-10  转账支持「股票账户 → Chase」
  *   · brokerInflow 改为净额：Transfer · 券商 记正，Redeem · 券商 记负。
@@ -1217,7 +1224,9 @@ function saveConfig(ss, data) {
 //
 // 和流动现金同构：存锚点，不存「当前余额」—— 当前余额随时间推算，
 // 改了 extra 立刻反映到未来每一期，不需要回头重算历史。
-var PROP_FIELDS = ["value","loan","origLoan","rate","termYears","payment","extra","updated"];
+var PROP_FIELDS = ["value","loan","origLoan","rate","termYears","payment","extra","updated",
+                   "payDay","autoPay","autoFrom"];
+// payDay 每月扣款日；autoPay 1=每期自动记账；autoFrom 从哪天起自动记（日期）
 // 建表时一律留空。绝不能填 0 —— readProperty 只跳过空值，0 是「有效值」，
 // 会被当成真实数据把小程序里的房产数字覆盖成零。留空则读出 null，
 // 前端保持本地值并把它上传上来（和 Config 一样的迁移路径）。
@@ -1247,7 +1256,7 @@ function readProperty(ss) {
     if (PROP_FIELDS.indexOf(k) < 0) continue;
     var raw = v[i][1];
     if (raw === "" || raw == null) continue;
-    if (k === "updated") {
+    if (k === "updated" || k === "autoFrom") {
       var d = s2d(raw);
       out[k] = (d && !isNaN(d.getTime())) ? d2s(d) : raw.toString().trim();
     } else {
@@ -1261,20 +1270,32 @@ function readProperty(ss) {
 // 当前余额 = 从锚点按整月摊销推算，和小程序里的 amortizeNow 同一套算法。
 // Sheet 上的 loan 是锚点（updated 那天的余额），不会自己变；把推算值单独
 // 写一行，你在 Sheet 里才看得到「现在到底欠多少」。
+function propNextPayDate(after, payDay) {
+  var day = Math.min(31, Math.max(1, parseInt(payDay, 10) || 1));
+  var y = after.getFullYear(), m = after.getMonth();
+  for (var i = 0; i < 3; i++) {
+    var last = new Date(y, m + 1, 0).getDate();
+    var d = new Date(y, m, Math.min(day, last));
+    if (d > after) return d;
+    m++; if (m > 11) { m = 0; y++; }
+  }
+  return null;
+}
+// 当前余额：从锚点起，每到扣款日还一期。只算锚点日期之后的扣款日。
+// 与前端 mtgSchedule 同一套算法，改一边必须改另一边。
 function propBalanceNow(p) {
   if (!p || !(p.loan > 0)) return null;
-  var start = s2d(p.updated);
-  if (!start || isNaN(start.getTime())) return null;
+  var d = s2d(p.updated);
+  if (!d || isNaN(d.getTime())) return null;
   var today = todaySv();
-  var months = (today.getFullYear() - start.getFullYear()) * 12 +
-               (today.getMonth() - start.getMonth());
-  if (months < 0) months = 0;
-  var mRate = (p.rate || 0) / 100 / 12;
+  var r = (p.rate || 0) / 100 / 12;
   var bal = p.loan;
-  for (var m = 0; m < months && bal > 0; m++) {
-    var interest = bal * mRate;
+  for (var g = 0; g < 720 && bal > 0.005; g++) {
+    d = propNextPayDate(d, p.payDay);
+    if (!d || d > today) break;
+    var interest = bal * r;
     var principal = ((p.payment || 0) - interest) + (p.extra || 0);
-    if (principal <= 0) break;                 // 月供还不够付利息，余额只会涨，不往下算
+    if (principal <= 0) break;                 // 月供还不够付利息，不往下算
     if (principal > bal) principal = bal;
     bal -= principal;
   }
@@ -1312,7 +1333,7 @@ function saveProperty(ss, data) {
   for (var j = 0; j < PROP_FIELDS.length; j++) {
     var f = PROP_FIELDS[j];
     if (data[f] == null || data[f] === "") continue;
-    var val = (f === "updated") ? data[f].toString().trim() : (parseFloat(data[f]) || 0);
+    var val = (f === "updated" || f === "autoFrom") ? data[f].toString().trim() : (parseFloat(data[f]) || 0);
     if (have[f]) sh.getRange(have[f], 2).setValue(val);
     else { sh.appendRow([f, val]); have[f] = sh.getLastRow(); }
   }

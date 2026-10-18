@@ -1121,11 +1121,12 @@ console.log('\n— 房产搬进 Sheet —');
   ok('写回的内容带上新值', sent.length>0 && +sent[sent.length-1].extra===1200,
      sent.length?sent[sent.length-1].extra:'');
 
-  // 摊销：锚点当月不动，跨月才走一步
-  ok('锚点当月余额 = 锚点值（房贷按月还，月中不变）',
-     w.eval("(function(){PROPERTY.updated='2026-09-01';PROPERTY.loan=250000;return amortizeNow();})()")===250000);
-  const next=w.eval("(function(){PROPERTY.updated='2026-08-01';PROPERTY.loan=250000;return amortizeNow();})()");
-  ok('跨一个月后余额下降', next<250000, '$'+next);
+  // 摊销：锚点之后还没到扣款日就不动，过了扣款日才走一步。
+  // 用相对日期 —— 写死年月的断言一跨月就会失效（踩过两次）
+  ok('锚点之后还没到扣款日，余额 = 锚点值',
+     w.eval("(function(){PROPERTY.payDay=1;PROPERTY.updated=fmtD(todayD());PROPERTY.loan=250000;return amortizeNow();})()")===250000);
+  const next=w.eval("(function(){const d=todayD();d.setMonth(d.getMonth()-2);PROPERTY.updated=fmtD(d);PROPERTY.loan=250000;return amortizeNow();})()");
+  ok('过了两个扣款日后余额下降', next<250000, '$'+next);
   ok('额外还本调高后余额降得更多',
      w.eval("(function(){PROPERTY.extra=2000;return amortizeNow();})()")<next);
 }
@@ -1189,28 +1190,12 @@ console.log('\n— 建表与房贷联动 —');
   ok('服务器没有房产数据时不覆盖本地', w.eval("PROPERTY.value")===415000,
      '$'+w.eval("PROPERTY.value"));
 
-  // ---- 方案 B：固定支出金额跟随房贷 ----
-  w=app({value:415000,loan:263000,origLoan:315000,rate:5.124,
-         termYears:30,payment:2025,extra:600,updated:'2026-08-01'}); await wait(500);
-  ok('房产参数已从 Sheet 取回', w.eval("PROPERTY.payment")===2025 && w.eval("PROPERTY.extra")===600);
-  ok('跟随房贷的金额 = 月供 + 额外还本',
-     w.eval("fixedAmount({linkProp:true})")===2625, w.eval("fixedAmount({linkProp:true})"));
-  ok('没勾跟随的仍用自己填的金额',
-     w.eval("fixedAmount({amount:70})")===70);
-
-  w.eval(`saveFixed([{id:'fm',name:'房贷月供',category:'Bill & utilities',
-    freq:'monthly',start:'2026-08-03',enabled:true,linkProp:true,amount:0}])`);
+  // 「跟随房贷」这个勾选已移除：房贷改由房产模块驱动，不再放在每条固定支出里
   w.openDetail('cash'); w.switchCashTab('ex'); w.openExpenseDrill('Bill & utilities');
-  const txt=w.document.getElementById('cashTabBody').textContent;
-  ok('列表里显示的是联动后的金额 $2,625', /2,625/.test(txt), txt.slice(0,80));
-  ok('并标注「跟随房贷」', /跟随房贷/.test(txt));
-
-  // 改额外还本后，金额自动跟着变
-  w.eval("PROPERTY.extra=1500;");
-  ok('把额外还本改成 1500 后自动变 $3,525',
-     w.eval("fixedAmount({linkProp:true})")===3525, w.eval("fixedAmount({linkProp:true})"));
-  w.openExpenseDrill('Bill & utilities');
-  ok('列表也跟着变', /3,525/.test(w.document.getElementById('cashTabBody').textContent));
+  w.showFixedForm('Bill & utilities');
+  ok('固定支出表单里不再有「跟随房贷月供」', !w.document.getElementById('fx-link') &&
+     !/跟随房贷/.test(w.document.getElementById('cashTabBody').textContent));
+  ok('金额输入框始终可见', !!w.document.getElementById('fx-amt'));
 }
 
 // ══════════════ 十九、Sheet 上要看得到「当前欠多少」 ══════════════
@@ -1812,4 +1797,141 @@ console.log('\n— 转账：股票账户 → Chase —');
   const cur=h[h.length-1];
   ok('本月净入金 = 转入 3000 − 转出 1200 = 1800', cur.net===1800, String(cur.net));
   ok('国债回流不算进券商净入金', cur.net===1800);
+}
+
+// ══════════════ 二十六、房产模块：每期还款由房产驱动 ══════════════
+// 每到扣款日记两笔：利息 → 支出（Bill & utilities），还本 → Transfer · 房贷
+// （不算支出，是在还自己的债）。余额由 amortizeNow 按计划推算，自动记账
+// 只动流动现金，不碰房贷锚点。
+console.log('\n— 房产：每期还款 —');
+{
+  const T=todayDate(); const iso=(d)=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  function todayDate(){ const d=new Date(); d.setHours(0,0,0,0); return d; }
+  function shift(days){ const d=todayDate(); d.setDate(d.getDate()+days); return d; }
+  function monthsAgo(n, day){ const d=todayDate(); return new Date(d.getFullYear(), d.getMonth()-n, day||1); }
+  const P0={value:500000,loan:300000,origLoan:350000,rate:6,termYears:30,payment:2000,extra:500,
+            updated:iso(monthsAgo(3,10)),payDay:15,autoPay:0,autoFrom:''};
+  function app(prop, ledger, fixed){
+    const calls=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        if(fixed) w.localStorage.setItem('fixedExpenses_v1',JSON.stringify(fixed));
+        w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+          if(a){ const p=Object.fromEntries(url.searchParams); calls.push(p);
+                 const dup=(ledger||[]).some(r=>r.key&&r.key===p.key);
+                 return Promise.resolve({json:async()=>({status:dup?'skipped':'success',row:88})}); }
+          return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},
+            ledger:ledger||[],monthly:{},ledgerMonths:[],
+            cash:{balance:20000,anchorDate:iso(monthsAgo(3)),anchorAmount:20000,hasAnchor:true,
+                  bookStart:iso(monthsAgo(6))},
+            savings:[],bond:[],notices:[],hsa:null,retire:[],config:{},property:prop,rsu:null,
+            stockHistory:[],serverDate:iso(T)})}); };
+        w.alert=(m)=>{ w.__alert=m; }; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, calls};
+  }
+
+  // ① 扣款日决定这一期算不算：锚点 = 今天，扣款日 = 明天 → 还没还
+  let {w}=app(Object.assign({},P0,{updated:iso(T),payDay:shift(1).getDate()}));
+  await wait(500);
+  if(shift(1).getMonth()===T.getMonth())
+    ok('扣款日还没到，余额不变', w.eval("amortizeNow()")===300000, '$'+w.eval("amortizeNow()"));
+  else ok('扣款日还没到，余额不变（月末跳过）', true);
+
+  // ② 三个月前起算、每月 15 号扣：过去的每个 15 号都算一期
+  ({w}=app(P0)); await wait(500);
+  const sched=w.eval("JSON.stringify(mtgSchedule(todayD()))");
+  const S=JSON.parse(sched);
+  ok('每期都落在 15 号', S.length>=2 && S.every(x=>x.date.slice(8)==='15'), S.map(x=>x.date).join(','));
+  const r=0.06/12;
+  ok('第一期利息 = 300000 × 6%/12 = 1500', Math.abs(S[0].interest-300000*r)<0.01, String(S[0].interest));
+  ok('第一期还本 = 2000 − 1500 + 500 = 1000', Math.abs(S[0].principal-1000)<0.01, String(S[0].principal));
+  ok('当前余额 = 计划里最后一期之后的余额',
+     w.eval("amortizeNow()")===Math.round(S[S.length-1].balAfter), '$'+w.eval("amortizeNow()"));
+
+  // ③ 额外还本的效果
+  const withX=JSON.parse(w.eval("JSON.stringify(payoffEstimate())"));
+  const noX=JSON.parse(w.eval("JSON.stringify(payoffEstimate(0))"));
+  ok('多还本 → 还清更早', withX.months<noX.months, `${withX.months} vs ${noX.months} 个月`);
+  ok('多还本 → 利息更少', withX.totalInterest<noX.totalInterest);
+  w.go('property'); w.renderPropPage();
+  const pt=w.document.getElementById('prop-body').textContent;
+  ok('页面显示「额外还本的效果」与少付利息', /额外还本的效果/.test(pt) && /少付利息/.test(pt));
+  ok('页面显示下一期的利息/还本构成', /下一期/.test(pt) && /算支出/.test(pt) && /不算支出/.test(pt));
+  ok('未开启自动记账时标明', /未开启/.test(pt));
+
+  // ④ 自动记账：开启后补记 autoFrom 之后的期数，利息算支出、还本算转账
+  const from=iso(monthsAgo(1,1));
+  let a=app(Object.assign({},P0,{autoPay:1,autoFrom:from})); await wait(700);
+  const recs=a.calls.filter(c=>c.action==='autoLedger');
+  const ints=recs.filter(c=>/:int$/.test(c.key)), prins=recs.filter(c=>/:prin$/.test(c.key));
+  ok('记了利息', ints.length>0 && ints.every(c=>c.category==='Bill & utilities' && c.note==='房贷利息'),
+     ints.map(c=>c.key).join(','));
+  ok('记了还本（Transfer · 房贷，不算支出）',
+     prins.length===ints.length && prins.every(c=>c.category==='Transfer · 房贷'));
+  ok('autoFrom 之前的期数不补', recs.every(c=>c.date>=from), recs.map(c=>c.date).join(','));
+  ok('每期利息 + 还本 = 月供 + 额外还本',
+     ints.every((c,i)=>Math.abs((+c.amount)+(+prins[i].amount)-2500)<0.02));
+  ok('自动记账不改房贷锚点', a.w.eval("PROPERTY.loan")===300000 && a.w.eval("PROPERTY.updated")===P0.updated);
+  ok('还本那笔在支出统计里不算支出', a.w.eval("catKind('Transfer · 房贷')")==='transfer');
+
+  // ⑤ 已记过的不再重复记
+  const done=recs.map(c=>({row:1,date:c.date,category:c.category,amount:+c.amount,note:c.note,key:c.key}));
+  let b=app(Object.assign({},P0,{autoPay:1,autoFrom:from}), done); await wait(700);
+  ok('已记过的期数不再重发', b.calls.filter(c=>c.action==='autoLedger').length===0,
+     `${b.calls.filter(c=>c.action==='autoLedger').length} 次`);
+
+  // ⑥ 打开自动记账时停用固定支出里那条房贷，避免同一期扣两次
+  const FIX=[{id:'fm',name:'房贷月供',amount:2625,category:'Bill & utilities',freq:'monthly',
+              start:iso(monthsAgo(6,3)),enabled:true},
+             {id:'fn',name:'网费',amount:70,category:'Bill & utilities',freq:'monthly',
+              start:iso(monthsAgo(6,5)),enabled:true}];
+  let c=app(P0,[],FIX); await wait(500);
+  c.w.go('property'); c.w.renderPropPage(); c.w.showPropForm();
+  c.w.setPropAuto(1);
+  c.w.savePropForm(); await wait(500);
+  const after=JSON.parse(c.w.localStorage.getItem('fixedExpenses_v1'));
+  ok('开启自动记账后，固定支出里的房贷被停用', after.find(x=>x.id==='fm').enabled===false);
+  ok('其他固定支出不受影响', after.find(x=>x.id==='fn').enabled!==false);
+  ok('自动记账状态写回 Sheet',
+     c.calls.some(x=>x.action==='saveProperty' && x.autoPay==='1' && x.payDay==='15'));
+
+  // ⑦ 只改额外还本时不重设起算点（原来每次保存都把锚点挪到今天）
+  let d=app(P0); await wait(500);
+  d.w.go('property'); d.w.renderPropPage(); d.w.showPropForm();
+  d.w.document.getElementById('p-extra').value='800';
+  d.w.savePropForm(); await wait(300);
+  ok('余额没改就不重设锚点', d.w.eval("PROPERTY.updated")===P0.updated && d.w.eval("PROPERTY.loan")===300000);
+  ok('额外还本改成 800', d.w.eval("PROPERTY.extra")===800);
+
+  // ⑧ 一次性还本：走转账，Chase 扣钱、记 Transfer · 房贷、余额从当前余额扣
+  let e=app(P0); await wait(500);
+  const bal0=e.w.eval("amortizeNow()"), cash0=e.w.eval("cashInfo.balance");
+  e.w.go('property'); e.w.renderPropPage(); e.w.showLumpForm();
+  e.w.document.getElementById('p-lump').value='10000';
+  e.w.saveLump(); await wait(300);
+  ok('一次性还本后余额 = 当前余额 − 10000', e.w.eval("amortizeNow()")===bal0-10000,
+     `${bal0} → ${e.w.eval("amortizeNow()")}`);
+  ok('Chase 同时扣 10000', e.w.eval("cashInfo.balance")===cash0-10000);
+  ok('流水记一笔 Transfer · 房贷',
+     e.calls.some(x=>x.action==='addLedger' && x.category==='Transfer · 房贷' && +x.amount===10000));
+
+  // ⑨ 后端余额算法与前端一致
+  const Pt=mkSheet('Property',[['Field','Value'],
+    ...Object.keys(P0).filter(k=>P0[k]!=='' ).map(k=>[k,P0[k]])]);
+  const tabs={Property:Pt, Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+    Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+    Anchor:mkSheet('Anchor',[['date','amount','note']]),
+    Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+    Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+    Ledger_monthly:mkSheet('Ledger_monthly',[])};
+  const g=backend(tabs);
+  const bp=J(g.doGet({parameter:{}})).property;
+  ok('后端 balanceNow 与前端 amortizeNow 一致',
+     bp.balanceNow===w.eval("(function(){Object.assign(PROPERTY,"+JSON.stringify(P0)+");return amortizeNow();})()"),
+     `后端 ${bp.balanceNow}`);
+  J(g.doGet({parameter:{action:'saveProperty', autoPay:1, autoFrom:'2026-11-01', payDay:20}}));
+  const bp2=J(g.doGet({parameter:{}})).property;
+  ok('新字段写进 Sheet：扣款日/自动记账/起始日',
+     bp2.payDay===20 && bp2.autoPay===1 && bp2.autoFrom==='2026-11-01', JSON.stringify(bp2).slice(0,160));
 }

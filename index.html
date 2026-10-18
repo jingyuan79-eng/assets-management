@@ -286,7 +286,10 @@ const DATA = {
 // 看起来完全合理，反而最难发现是假的。
 const PROPERTY = {
   value:0, loan:0, origLoan:0, rate:0,
-  termYears:30, payment:0, extra:0, updated:""
+  termYears:30, payment:0, extra:0, updated:"",
+  payDay:1,        // 每月几号扣款
+  autoPay:0,       // 1 = 每期由房产模块自动记账（利息算支出、还本算转账）
+  autoFrom:""      // 从哪天起自动记；之前的期数不补，避免和旧的固定支出重复
 };
 try{ const sp=JSON.parse(localStorage.getItem('property_v1')||'null'); if(sp) Object.assign(PROPERTY,sp); }catch(e){}
 function persistProp(){
@@ -308,13 +311,6 @@ function rebuildProperty(info){
   try{ localStorage.setItem('property_v1', JSON.stringify(PROPERTY)); }catch(e){}
 }
 
-// ---- 方案 B：固定支出里的房贷金额跟随房产模块 ----
-// 勾了 linkProp 的那条固定支出，金额取「标准月供 + 每月额外还本」，
-// 不用存死数字。你在房产页调额外还本，下一期自动跟着变。
-function fixedAmount(it){
-  if(it && it.linkProp) return Math.round((PROPERTY.payment||0)+(PROPERTY.extra||0));
-  return (it&&it.amount)||0;
-}
 
 const ORDER = ['stock','cd','bond','hsa','cash'];
 const ORDER_TAX = ['retire'];
@@ -446,7 +442,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V7.5';
+const APP_VER='V8.0';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -654,6 +650,7 @@ function syncStockFromSheet(){
       return runFixedExpenses()
         .then(function(){ return runPayroll(); })
         .then(function(){ return runHsaContrib(); })
+        .then(function(){ return runMortgage(); })
         .then(function(){
           runRecurring();
           rebuildMonthExpense();
@@ -791,7 +788,7 @@ function runFixedExpensesInner(){
     dueDates(it).forEach(function(ds){
       const key='fix:'+it.id+':'+ds;
       if(ledgerHasKey(key)) return;
-      jobs.push({item:it, date:ds, key:key, amount:fixedAmount(it)});
+      jobs.push({item:it, date:ds, key:key});
     });
   });
   if(!jobs.length) return Promise.resolve();
@@ -799,16 +796,16 @@ function runFixedExpensesInner(){
   jobs.forEach(function(j){
     chain=chain.then(function(){
       return apiWrite({action:'autoLedger', key:j.key, date:j.date,
-                       category:j.item.category, amount:j.amount,
+                       category:j.item.category, amount:j.item.amount,
                        note:j.item.name+'（固定）'}).then(function(res){
         if(res && res.status==='success'){
           const nr={row:res.row, date:j.date, category:j.item.category,
-                    amount:j.amount, note:j.item.name+'（固定）', key:j.key};
+                    amount:j.item.amount, note:j.item.name+'（固定）', key:j.key};
           ledgerRows.push(nr); applyCashDelta(signedOf(nr));
         }else if(res && res.status==='skipped'){
           // Sheet 里已存在（多设备场景），本地补一条占位，避免重复判断
           ledgerRows.push({row:res.row, date:j.date, category:j.item.category,
-                           amount:j.amount, note:j.item.name+'（固定）', key:j.key});
+                           amount:j.item.amount, note:j.item.name+'（固定）', key:j.key});
         }
       });
     });
@@ -827,7 +824,7 @@ let editingFixedId=null;
 function renderFixedSection(cat){
   const list=loadFixed().filter(function(x){ return x.category===cat; });
   const monthly=list.filter(x=>x.enabled!==false)
-    .reduce(function(s,x){ return s + fixedAmount(x)/(FREQ_MONTHS[x.freq]||1); },0);
+    .reduce(function(s,x){ return s + (x.amount||0)/(FREQ_MONTHS[x.freq]||1); },0);
   let html='<div style="display:flex;align-items:baseline;margin:18px 2px 8px">'+
     '<div style="flex:1;font-size:13px;font-weight:600;color:var(--ink)">固定支出</div>'+
     '<div class="num" style="font-size:12px;color:var(--ink-faint)">折合每月 $'+fmt(Math.round(monthly))+'</div></div>';
@@ -839,8 +836,7 @@ function renderFixedSection(cat){
         return '<div class="row" style="cursor:pointer;border-color:rgba(0,0,0,.06);'+(off?'opacity:.45':'')+'" onclick="editFixed(\''+x.id+'\')">'+
           '<div class="tk" style="width:auto;flex:1"><div class="sym" style="font-size:13px">'+x.name+(off?' · 已停用':'')+'</div>'+
           '<div class="qty">'+(FREQ_LABEL[x.freq]||'每月')+' · '+(x.start||'').replace(/-/g,'/')+' 起</div></div>'+
-          '<div class="val"><div class="mv">$'+fmt(fixedAmount(x))+'</div>'+
-          (x.linkProp?'<div class="pc" style="color:var(--prop)">跟随房贷</div>':'')+'</div></div>';
+          '<div class="val"><div class="mv">$'+fmt(x.amount)+'</div></div></div>';
       }).join('')+'</div>';
   }
   html+='<div class="addbox" style="border-color:rgba(0,0,0,.12);background:'+(EXP_COLORS[cat]||'var(--hsa-bg)')+'" onclick="showFixedForm(\''+cat.replace(/'/g,"\\'")+'\')">'+
@@ -857,15 +853,7 @@ function fixedFormHtml(v, cat){
   return '<div class="editform" style="border-color:rgba(0,0,0,.12)">'+
     '<div style="font-size:12px;color:var(--ink-faint);margin-bottom:12px">归入 '+cat+'</div>'+
     '<div class="fld"><label>名称</label><input id="fx-name" value="'+(v.name||'')+'" placeholder="例：房贷月供 / 车保险 / 宠物保险" autocomplete="off"></div>'+
-    '<div class="fld"><label style="display:flex;align-items:center;gap:6px;cursor:pointer">'+
-      '<input id="fx-link" type="checkbox"'+(v.linkProp?' checked':'')+
-        ' onchange="toggleFixedLink()" style="width:auto;margin:0">'+
-      '<span>金额跟随房贷月供</span></label>'+
-      '<div style="font-size:11px;color:var(--ink-faint);margin-top:2px">'+
-        '勾上就用房产页的「标准月供 + 每月额外还本」，当前 $'+
-        fmt((PROPERTY.payment||0)+(PROPERTY.extra||0))+'；改额外还本会自动跟着变</div></div>'+
-    '<div class="fld" id="fx-amt-fld"'+(v.linkProp?' style="display:none"':'')+
-      '><label>金额 ($)</label><input id="fx-amt" type="number" inputmode="decimal" value="'+(v.amount!=null?v.amount:'')+'" placeholder="例：2025"></div>'+
+    '<div class="fld"><label>金额 ($)</label><input id="fx-amt" type="number" inputmode="decimal" value="'+(v.amount!=null?v.amount:'')+'" placeholder="例：2025"></div>'+
     '<div class="fld"><label>频率</label><select id="fx-freq" style="'+st+'">'+
       Object.keys(FREQ_LABEL).map(function(k){ return '<option value="'+k+'"'+(freq===k?' selected':'')+'>'+FREQ_LABEL[k]+'</option>'; }).join('')+
     '</select></div>'+
@@ -880,11 +868,6 @@ function fixedFormHtml(v, cat){
       '<button class="danger" onclick="deleteFixed(\''+v.id+'\')">删除</button>'+
     '</div></div>':'')+
   '</div>';
-}
-function toggleFixedLink(){
-  const on=document.getElementById('fx-link').checked;
-  const fld=document.getElementById('fx-amt-fld');
-  if(fld) fld.style.display = on ? 'none' : '';
 }
 function cancelFixedForm(){ editingFixedId=null; refreshLedgerViews(); }
 function showFixedForm(cat){
@@ -908,23 +891,20 @@ function editFixed(id){
 }
 function saveFixed_(cat){
   const name=document.getElementById('fx-name').value.trim();
-  const linkEl=document.getElementById('fx-link');
-  const linkProp=!!(linkEl&&linkEl.checked);
-  const amt=linkProp ? fixedAmount({linkProp:true}) : parseFloat(document.getElementById('fx-amt').value);
+  const amt=parseFloat(document.getElementById('fx-amt').value);
   const freq=document.getElementById('fx-freq').value;
   const start=document.getElementById('fx-start').value;
-  if(!name || !start){ alert('请填写名称和首次扣款日'); return; }
-  if(!linkProp && !(amt>0)){ alert('请填写金额'); return; }
+  if(!name || !(amt>0) || !start){ alert('请填写名称、金额、首次扣款日'); return; }
   const list=loadFixed();
   if(editingFixedId){
     const it=list.find(function(x){ return x.id===editingFixedId; });
-    if(it){ it.name=name; it.amount=Math.round(amt*100)/100; it.freq=freq; it.start=start; it.linkProp=linkProp; }
+    if(it){ it.name=name; it.amount=Math.round(amt*100)/100; it.freq=freq; it.start=start; }
   }else{
     // 同分类同名视为同一笔；真要建两笔同名的，加个序号区分
     let fid=stableId('f',[cat,name]), n=1;
     while(list.some(function(x){ return x.id===fid; })) fid=stableId('f',[cat,name,++n]);
     list.push({id:fid, name:name, amount:Math.round(amt*100)/100,
-               category:cat, freq:freq, start:start, enabled:true, linkProp:linkProp});
+               category:cat, freq:freq, start:start, enabled:true});
   }
   if(!saveFixed(list)) return;
   editingFixedId=null;
@@ -1128,36 +1108,57 @@ function roll401k(){
 load401k(); roll401k();
 
 // ==================== 房贷计算 ====================
+// ---- 房贷还款计划 ----
+// 锚点 = updated 那天的余额。之后每到「扣款日」还一期：
+//   利息 = 当期余额 × 年利率/12，还本 = 标准月供 − 利息 + 额外还本。
+// 只算锚点日期之后的扣款日 —— 锚点那天的余额已经反映了之前的还款。
+// 后端 propBalanceNow 用的是同一套算法，改这里要一起改。
+const MTG_INT_CAT='Bill & utilities';     // 利息记进哪个支出分类
+function mtgNextPayDate(after){
+  const day=Math.min(31,Math.max(1,parseInt(PROPERTY.payDay,10)||1));
+  let y=after.getFullYear(), m=after.getMonth();
+  for(let i=0;i<3;i++){
+    const last=new Date(y,m+1,0).getDate();          // 31 号在小月按月末算
+    const d=new Date(y,m,Math.min(day,last));
+    if(d>after) return d;
+    m++; if(m>11){ m=0; y++; }
+  }
+  return null;
+}
+function mtgSchedule(until, extraOverride){
+  const out=[];
+  if(!PROPERTY.updated || !(PROPERTY.loan>0)) return out;
+  const r=(PROPERTY.rate||0)/100/12;
+  const extra=(extraOverride==null)?(PROPERTY.extra||0):extraOverride;
+  let bal=PROPERTY.loan, d=dateOf(PROPERTY.updated);
+  for(let g=0; g<720 && bal>0.005; g++){
+    d=mtgNextPayDate(d);
+    if(!d || (until && d>until)) break;
+    const interest=bal*r;
+    let principal=(PROPERTY.payment||0)-interest+extra;
+    if(principal<=0) break;                         // 月供不够付利息：余额只会涨，不往下算
+    if(principal>bal) principal=bal;
+    bal-=principal;
+    out.push({date:fmtD(d), interest:interest, principal:principal, balAfter:bal});
+  }
+  return out;
+}
 function amortizeNow(){
   if(!PROPERTY.updated || !(PROPERTY.loan>0)) return Math.round(PROPERTY.loan||0);
-  const monthlyRate = PROPERTY.rate/100/12;
-  const start = new Date(PROPERTY.updated+'T00:00:00');
-  const now = new Date();
-  let months = (now.getFullYear()-start.getFullYear())*12 + (now.getMonth()-start.getMonth());
-  months = Math.max(0, months);
-  let bal = PROPERTY.loan;
-  for(let m=0;m<months;m++){
-    const interest = bal*monthlyRate;
-    let principal = (PROPERTY.payment - interest) + PROPERTY.extra;
-    if(principal>bal) principal=bal;
-    bal -= principal;
-    if(bal<=0){ bal=0; break; }
-  }
-  return Math.round(bal);
+  const s=mtgSchedule(todayD());
+  return Math.round(s.length ? s[s.length-1].balAfter : PROPERTY.loan);
 }
-function payoffEstimate(){
-  const monthlyRate = PROPERTY.rate/100/12;
-  let bal = amortizeNow();
-  let months=0, totalInterest=0;
-  const pay = PROPERTY.payment + PROPERTY.extra;
-  while(bal>0 && months<600){
-    const interest = bal*monthlyRate;
-    let principal = pay - interest;
+function payoffEstimate(extraOverride){
+  const r=(PROPERTY.rate||0)/100/12;
+  const extra=(extraOverride==null)?(PROPERTY.extra||0):extraOverride;
+  const pay=(PROPERTY.payment||0)+extra;
+  let bal=amortizeNow(), months=0, totalInterest=0;
+  while(bal>0.005 && months<720){
+    const interest=bal*r;
+    let principal=pay-interest;
     if(principal<=0){ months=-1; break; }
     if(principal>bal) principal=bal;
-    totalInterest += interest;
-    bal -= principal;
-    months++;
+    totalInterest+=interest; bal-=principal; months++;
   }
   return {months, totalInterest:Math.round(totalInterest)};
 }
@@ -1566,89 +1567,196 @@ function openDetail(k, keepScroll){
 }
 
 // ==================== 房产页 ====================
+function ymCN(d){ return d.getFullYear()+'年'+(d.getMonth()+1)+'月'; }
+function addMonths(d,n){ return new Date(d.getFullYear(), d.getMonth()+n, 1); }
+function durCN(m){ const y=Math.floor(m/12), r=m%12; return (y?y+'年':'')+(r?r+'个月':(y?'':'0个月')); }
+
 function renderPropPage(){
+  const P=PROPERTY;
+  const body=document.getElementById('prop-body');
+  if(!(P.loan>0) && !(P.value>0)){
+    body.innerHTML='<div class="placeholder" style="margin-bottom:14px">还没有房产数据。点下面「编辑贷款参数」填一次即可。</div>'+
+      propActions()+'<div id="propEditWrap"></div>';
+    return;
+  }
   const bal=amortizeNow();
-  const net=PROPERTY.value-bal;
-  const paidPrincipal=PROPERTY.origLoan-bal;
-  // 还没填原贷金额时不能除零，否则进度条会显示成非数字
-  const progress=PROPERTY.origLoan>0 ? (paidPrincipal/PROPERTY.origLoan*100) : 0;
-  const est=payoffEstimate();
-  const yrs=Math.floor(est.months/12), mos=est.months%12;
-  const mRate=PROPERTY.rate/100/12;
-  const thisInterest=bal*mRate;
-  const thisPrincipal=(PROPERTY.payment-thisInterest)+PROPERTY.extra;
-  document.getElementById('prop-body').innerHTML=
+  const net=(P.value||0)-bal;
+  const paid=Math.max(0,(P.origLoan||0)-bal);
+  const progress=P.origLoan>0 ? Math.min(100,paid/P.origLoan*100) : 0;
+  const monthly=(P.payment||0)+(P.extra||0);
+  // 下一期：今天之后的第一个扣款日
+  const today=todayD();
+  const next=mtgNextPayDate(today);
+  const r=(P.rate||0)/100/12;
+  const nInt=bal*r, nPrin=Math.max(0,Math.min(bal,monthly-nInt));
+  const withX=payoffEstimate(), noX=payoffEstimate(0);
+  const on=+P.autoPay===1;
+  const row=(l,sub,v,c)=>'<div class="row" style="border-color:var(--prop-ln)">'+
+    '<div class="tk" style="width:auto;flex:1"><div class="sym" style="font-size:13px">'+l+'</div>'+
+    (sub?'<div class="qty">'+sub+'</div>':'')+'</div>'+
+    '<div class="val"><div class="mv"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div></div></div>';
+  const grp=(title,right,inner)=>'<div class="group" style="background:var(--prop-bg);border-color:var(--prop-ln)">'+
+    '<div class="grp-head" style="border-color:var(--prop-ln)"><div class="cat">'+title+'</div>'+
+    (right?'<span class="gpc" style="color:var(--prop)">'+right+'</span>':'')+'</div>'+inner+'</div>';
+
+  let effect='';
+  if(withX.months<0){
+    effect=row('月供不足','月供付不起利息，余额不会下降','—','var(--neg)');
+  }else{
+    const payoffD=addMonths(today, withX.months);
+    effect=row('预计还清', durCN(withX.months)+'后', ymCN(payoffD))+
+           row('剩余利息','还清前还要付的利息','$'+fmt(withX.totalInterest));
+    if((P.extra||0)>0 && noX.months>0){
+      const saveM=noX.months-withX.months, saveI=noX.totalInterest-withX.totalInterest;
+      effect+=row('额外还本的效果','每月多还 $'+fmt(P.extra),
+                  '提前 '+durCN(saveM),'var(--pos)')+
+              row('少付利息','对比只还标准月供','$'+fmt(saveI),'var(--pos)');
+    }
+  }
+
+  body.innerHTML=
     '<div class="dhero dark" style="border-color:var(--prop)">'+
       '<div class="l" style="color:var(--prop)">房产净值 · 不计入投资总额</div>'+
       '<div class="v num"><span class="cur">$</span>'+fmt(net)+'</div>'+
-      '<div class="s">估值 $'+fmt(PROPERTY.value)+' − 房贷 $'+fmt(bal)+'</div></div>'+
-    '<div class="group" style="background:var(--prop-bg);border-color:var(--prop-ln)">'+
-      '<div class="grp-head" style="border-color:var(--prop-ln)"><div class="cat">还款进度</div>'+
-      '<span class="gpc" style="color:var(--prop)">'+progress.toFixed(1)+'%</span></div>'+
-      '<div style="padding:14px">'+
+      '<div class="s">估值 $'+fmt(P.value)+' − 房贷 $'+fmt(bal)+'</div></div>'+
+
+    grp('每月还款','$'+fmt(monthly),
+      row('标准月供', (P.termYears||30)+'年期 · 年利率 '+(+P.rate||0)+'%', '$'+fmt(P.payment))+
+      row('额外还本','每月多还，直接冲本金','$'+fmt(P.extra))+
+      (next ? row('下一期 · '+(next.getMonth()+1)+'/'+next.getDate(),
+                  '利息 $'+fmt(Math.round(nInt))+'（算支出）· 还本 $'+fmt(Math.round(nPrin))+'（不算支出）',
+                  '$'+fmt(Math.round(nInt+nPrin))) : '')+
+      row('自动记账', on
+          ? ('每月 '+(P.payDay||1)+' 号从 Chase 扣，自动记一笔利息和一笔还本')
+          : '未开启 · 在「编辑贷款参数」里打开',
+          on?'已开启':'未开启', on?'var(--pos)':'var(--ink-faint)'))+
+
+    grp('还款进度', progress.toFixed(1)+'%',
+      '<div style="padding:12px 14px 4px">'+
         '<div style="height:8px;background:#0002;border-radius:4px;overflow:hidden">'+
           '<div style="height:100%;width:'+progress.toFixed(1)+'%;background:var(--prop)"></div></div>'+
         '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--ink-2)">'+
-          '<span>已还本金 $'+fmt(paidPrincipal)+'</span>'+
-          '<span>原贷 $'+fmt(PROPERTY.origLoan)+'</span></div></div></div>'+
-    '<div class="group" style="background:var(--prop-bg);border-color:var(--prop-ln)">'+
-      '<div class="grp-head" style="border-color:var(--prop-ln)"><div class="cat">贷款明细</div>'+
-      '<span class="gpc" style="color:var(--prop)">'+PROPERTY.rate+'%</span></div>'+
-      propRow('当前余额','未偿本金','$'+fmt(bal))+
-      propRow('标准月供','30年期','$'+fmt(PROPERTY.payment))+
-      propRow('额外还本','每月多还','$'+fmt(PROPERTY.extra))+
-      propRow('本月利息','余额×月利率','$'+fmt(Math.round(thisInterest)))+
-      propRow('本月还本','含额外','$'+fmt(Math.round(thisPrincipal)))+
-    '</div>'+
-    '<div class="group" style="background:var(--prop-bg);border-color:var(--prop-ln)">'+
-      '<div class="grp-head" style="border-color:var(--prop-ln)"><div class="cat">提前还清预估<span class="sub">按当前月供+额外</span></div></div>'+
-      propRow('预计还清','从现在算起', (est.months<0?'月供不足':(yrs+'年'+(mos?mos+'月':'')) ))+
-      propRow('剩余利息','还清前总利息','$'+fmt(est.totalInterest))+
-    '</div>'+
-    '<div class="addbox" style="border-color:var(--prop-ln);background:var(--prop-bg)" onclick="showExtraForm()">'+
-      '<div class="plus" style="color:var(--prop)">✎</div>'+
-      '<div class="lbl">编辑额外还款 / 估值 / 余额</div></div>'+
+          '<span>已还本金 $'+fmt(paid)+'</span><span>原贷 $'+fmt(P.origLoan)+'</span></div></div>'+
+      row('当前余额','未偿本金','$'+fmt(bal)))+
+
+    grp('还清预估','按当前月供 + 额外还本', effect)+
+    propActions()+
     '<div id="propEditWrap"></div>';
 }
-function propRow(sym,desc,val){
-  return '<div class="row" style="border-color:var(--prop-ln)">'+
-    '<div class="tk"><div class="sym">'+sym+'</div></div>'+
-    '<div class="desc">'+desc+'</div>'+
-    '<div class="val"><div class="mv">'+val+'</div></div></div>';
+function propActions(){
+  return '<div style="display:flex;gap:8px;margin-top:4px">'+
+    '<div class="addbox" style="flex:1;margin:0;border-color:var(--prop-ln);background:var(--prop-bg)" onclick="showPropForm()">'+
+      '<div class="plus" style="color:var(--prop)">✎</div><div class="lbl">编辑贷款参数</div></div>'+
+    '<div class="addbox" style="flex:1;margin:0;border-color:var(--prop-ln);background:var(--prop-bg)" onclick="showLumpForm()">'+
+      '<div class="plus" style="color:var(--prop)">＋</div><div class="lbl">一次性还本</div></div>'+
+  '</div>';
 }
-function showExtraForm(){
+
+// ---- 编辑贷款参数 ----
+let propAutoDraft=0;
+function setPropAuto(v){ propAutoDraft=v;
+  ['on','off'].forEach(function(k){ const el=document.getElementById('pa-'+k);
+    if(el) el.className='cashtab'+((k==='on')===(v===1)?(v===1?' on-in':' on-ex'):''); });
+  const f=document.getElementById('pa-from-fld'); if(f) f.style.display=v?'':'none';
+}
+function showPropForm(){
   const wrap=document.getElementById('propEditWrap');
+  if(wrap.innerHTML){ wrap.innerHTML=''; return; }
+  const P=PROPERTY; propAutoDraft=+P.autoPay===1?1:0;
+  const tm=new Date(todayD()); tm.setDate(tm.getDate()+1);
+  const fld=(id,label,val,ph,type)=>'<div class="fld"><label>'+label+'</label>'+
+    '<input id="'+id+'" type="'+(type||'number')+'" inputmode="decimal" value="'+(val==null?'':val)+'"'+
+    (ph?' placeholder="'+ph+'"':'')+'></div>';
   wrap.innerHTML=
     '<div class="editform" style="border-color:var(--prop-ln)">'+
-      '<div class="fld"><label>额外还本 ($/月)</label>'+
-        '<input id="p-extra" type="number" inputmode="decimal" value="'+PROPERTY.extra+'"></div>'+
-      '<div class="fld"><label>房产估值 ($)</label>'+
-        '<input id="p-value" type="number" inputmode="decimal" value="'+PROPERTY.value+'"></div>'+
-      '<div class="fld"><label>当前贷款余额 ($) · 可校准</label>'+
-        '<input id="p-loan" type="number" inputmode="decimal" value="'+amortizeNow()+'"></div>'+
-      '<div class="fld"><label>一次性额外还贷 ($) · 直接从余额扣除</label>'+
-        '<input id="p-lump" type="number" inputmode="decimal" placeholder="例：10000"></div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<div style="flex:1">'+fld('p-value','房产估值 ($)',P.value||'')+'</div>'+
+        '<div style="flex:1">'+fld('p-loan','当前贷款余额 ($)',amortizeNow()||'')+'</div></div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin:-4px 0 8px">余额请填<b>最近一次扣款之后</b>的数字；没改就不会重设起算点</div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<div style="flex:1">'+fld('p-pay','标准月供 ($)',P.payment||'')+'</div>'+
+        '<div style="flex:1">'+fld('p-extra','每月额外还本 ($)',P.extra||0)+'</div></div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<div style="flex:1">'+fld('p-rate','年利率 (%)',P.rate||'')+'</div>'+
+        '<div style="flex:1">'+fld('p-day','每月扣款日',P.payDay||1,'1–31')+'</div></div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<div style="flex:1">'+fld('p-orig','原始贷款额 ($)',P.origLoan||'')+'</div>'+
+        '<div style="flex:1">'+fld('p-term','贷款年限',P.termYears||30)+'</div></div>'+
+      '<div class="fld"><label>每期自动记账（利息算支出、还本算转账）</label>'+
+        '<div class="cashtabs" style="margin:2px 0 0">'+
+          '<div id="pa-on" class="cashtab" onclick="setPropAuto(1)">开启</div>'+
+          '<div id="pa-off" class="cashtab" onclick="setPropAuto(0)">关闭</div></div></div>'+
+      '<div class="fld" id="pa-from-fld">'+
+        '<label>从哪天起自动记（之前的期数不补）</label>'+
+        '<input id="p-from" type="date" value="'+(P.autoFrom||fmtD(tm))+'"></div>'+
       '<div class="btns">'+
         '<button class="cancel" onclick="document.getElementById(\'propEditWrap\').innerHTML=\'\'">取消</button>'+
-        '<button class="save" style="background:var(--prop)" onclick="saveExtra()">保存</button>'+
+        '<button class="save" style="background:var(--prop)" onclick="savePropForm()">保存</button>'+
       '</div></div>';
+  setPropAuto(propAutoDraft);
+  wrap.scrollIntoView({behavior:'smooth',block:'center'});
 }
-function saveExtra(){
-  const extra=parseFloat(document.getElementById('p-extra').value);
-  const value=parseFloat(document.getElementById('p-value').value);
-  let loan=parseFloat(document.getElementById('p-loan').value);
-  const lump=parseFloat(document.getElementById('p-lump').value);
-  if(extra>=0) PROPERTY.extra=Math.round(extra);
-  if(value>0) PROPERTY.value=Math.round(value);
-  if(loan>0){ PROPERTY.loan=Math.round(loan); PROPERTY.updated=fmtD(todayD()); }
-  if(lump>0){
-    const cur = (loan>0?Math.round(loan):amortizeNow());
-    PROPERTY.loan = Math.max(0, cur - Math.round(lump));
-    PROPERTY.updated = fmtD(todayD());
+function savePropForm(){
+  const P=PROPERTY, num=id=>parseFloat(document.getElementById(id).value);
+  const v=num('p-value'), loan=num('p-loan'), pay=num('p-pay'), extra=num('p-extra'),
+        rate=num('p-rate'), day=parseInt(document.getElementById('p-day').value,10),
+        orig=num('p-orig'), term=num('p-term');
+  if(!(loan>=0) || !(pay>0) || !(rate>=0)){ alert('请至少填写当前余额、标准月供和年利率'); return; }
+  if(!(day>=1 && day<=31)){ alert('扣款日请填 1–31'); return; }
+  // 余额只有真的改了才重设起算点；不然每次保存都把锚点挪到今天
+  const curBal=amortizeNow();
+  if(!P.updated || Math.abs(loan-curBal)>=1){ P.loan=Math.round(loan*100)/100; P.updated=fmtD(todayD()); }
+  if(v>=0) P.value=Math.round(v);
+  P.payment=Math.round(pay*100)/100;
+  P.extra=extra>0?Math.round(extra*100)/100:0;
+  P.rate=rate; P.payDay=day;
+  if(orig>0) P.origLoan=Math.round(orig); else if(!(P.origLoan>0)) P.origLoan=Math.round(loan);
+  if(term>0) P.termYears=Math.round(term);
+  const turningOn = propAutoDraft===1 && +P.autoPay!==1;
+  P.autoPay=propAutoDraft;
+  if(propAutoDraft===1) P.autoFrom=document.getElementById('p-from').value||fmtD(todayD());
+  // 打开自动记账时，固定支出里那条手填的房贷必须停掉，否则同一期扣两次
+  if(turningOn){
+    const list=loadFixed();
+    const dup=list.filter(function(x){ return x.enabled!==false && /房贷|mortgage/i.test(x.name||''); });
+    if(dup.length && confirm('固定支出里有：'+dup.map(x=>x.name+' $'+fmt(x.amount)).join('、')+
+        '\n开启后由房产模块每期自动记账，要停用这条固定支出吗？\n（不停用的话同一期会扣两次）')){
+      dup.forEach(function(x){ x.enabled=false; });
+      saveFixed(list);
+    }
   }
+  document.getElementById('propEditWrap').innerHTML='';
   persistProp();
-  renderPropPage();
-  renderPropCard();
+  renderPropPage(); renderPropCard(); recompute();
+  runMortgage().then(function(){ renderPropPage(); refreshLedgerViews(); });
+}
+
+// ---- 一次性还本：走转账，Chase 真的扣钱、流水里有记录 ----
+function showLumpForm(){
+  const wrap=document.getElementById('propEditWrap');
+  if(wrap.innerHTML){ wrap.innerHTML=''; return; }
+  wrap.innerHTML=
+    '<div class="editform" style="border-color:var(--prop-ln)">'+
+      '<div class="fld"><label>一次性还本金额 ($)</label>'+
+        '<input id="p-lump" type="number" inputmode="decimal" placeholder="例：10000"></div>'+
+      '<div class="fld"><label>从哪个账户付</label><select id="p-lump-src">'+
+        SRC_OPTS.filter(o=>o.k!=='broker').map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+
+      '</select></div>'+
+      '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:10px">直接冲本金：余额立刻减少，付款账户同时扣钱，记一笔「Transfer · 房贷」</div>'+
+      '<div class="btns">'+
+        '<button class="cancel" onclick="document.getElementById(\'propEditWrap\').innerHTML=\'\'">取消</button>'+
+        '<button class="save" style="background:var(--prop)" onclick="saveLump()">还本</button>'+
+      '</div></div>';
+  wrap.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function saveLump(){
+  const amt=parseFloat(document.getElementById('p-lump').value);
+  const src=document.getElementById('p-lump-src').value;
+  if(!(amt>0)){ alert('请输入金额'); return; }
+  if(amt>amortizeNow()){ alert('超过了当前贷款余额 $'+fmt(amortizeNow())); return; }
+  doTransfer(src,'mortgage',amt);
+  document.getElementById('propEditWrap').innerHTML='';
+  recompute(); renderPropPage(); renderPropCard();
 }
 
 // ==================== 储蓄 CD：增 / 改 / 删 ====================
@@ -2677,7 +2785,8 @@ function addToTarget(key, amt, srcKey, dateStr, dedupeKey){
   }else if(key==='broker'){
     adjustBrokerCash(amt);
   }else if(key==='mortgage'){
-    PROPERTY.loan=Math.max(0, Math.round((PROPERTY.loan!=null?PROPERTY.loan:amortizeNow())-amt));
+    // 从「当前余额」扣，而不是锚点余额 —— 锚点之后已经还过的期数也要算进去
+    PROPERTY.loan=Math.max(0, amortizeNow()-Math.round(amt));
     PROPERTY.updated=fmtD(todayD());
     persistProp();
   }else if(key==='marcus'){
@@ -2723,6 +2832,37 @@ function xferKey(r, d){
   if(!r.id){ r.id=stableId('x',[r.src,r.tgt,r.amt,r.freq,r.start]); }
   return 'xfer:'+r.id+':'+fmtD(d);
 }
+function runMortgage(){
+  if(!(+PROPERTY.autoPay) || !(PROPERTY.payment>0)) return Promise.resolve();
+  const floor=bookFloor();
+  const from=PROPERTY.autoFrom ? dateOf(PROPERTY.autoFrom) : null;
+  const jobs=[];
+  mtgSchedule(todayD()).forEach(function(p){
+    const pd=dateOf(p.date);
+    if(pd<floor || (from && pd<from)) return;
+    const ym=p.date.slice(0,7);
+    jobs.push({key:'mtg:'+ym+':int',  date:p.date, cat:MTG_INT_CAT,
+               amt:Math.round(p.interest*100)/100,  note:'房贷利息'});
+    jobs.push({key:'mtg:'+ym+':prin', date:p.date, cat:'Transfer · 房贷',
+               amt:Math.round(p.principal*100)/100, note:'房贷还本'});
+  });
+  const todo=jobs.filter(function(j){ return j.amt>0 && !ledgerHasKey(j.key); });
+  if(!todo.length) return Promise.resolve();
+  let chain=Promise.resolve();
+  todo.forEach(function(j){
+    chain=chain.then(function(){
+      return apiWrite({action:'autoLedger', key:j.key, date:j.date,
+                       category:j.cat, amount:j.amt, note:j.note}).then(function(res){
+        const nr={row:res&&res.row, date:j.date, category:j.cat, amount:j.amt, note:j.note, key:j.key};
+        ledgerRows.push(nr);
+        // 余额已经由 amortizeNow 按计划推算，这里只动流动现金，不碰房贷锚点
+        if(res && res.status==='success') applyCashDelta(signedOf(nr));
+      });
+    });
+  });
+  return chain.then(function(){ rebuildMonthExpense(); recompute(); });
+}
+
 function runRecurring(){
   const list=loadRecurring();
   const today=todayD();
