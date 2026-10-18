@@ -2046,3 +2046,149 @@ console.log('\n— 房产：还款记录 —');
   ok('后端 mtgOld 与 ledger 不重叠', !mo.some(x=>res.ledger.some(y=>y.row===x.row)));
   ok('近期那笔还本仍在 ledger 里', res.ledger.some(x=>x.amount===1010 && x.category==='Transfer · 房贷'));
 }
+
+// ══════════════ 二十八、车贷 ══════════════
+// 等额本息，整期月供记进 Auto & Gas（key = car:年-月）。余额由还款表直接算出，
+// 不需要锚点。前后端各有一份算法，必须一致。
+console.log('\n— 车贷 —');
+{
+  const pad2=(n)=>String(n).padStart(2,'0');
+  const iso=(d)=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const T=new Date(); T.setHours(0,0,0,0);
+  const mAgo=(n,day)=>new Date(T.getFullYear(), T.getMonth()-n, day);
+  const C0={price:54346.70, down:8000, loan:46097, apr:1.49, months:60, firstPay:''};
+  function app(car, ledger){
+    const calls=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+          if(a){ const p=Object.fromEntries(url.searchParams); calls.push(p);
+                 const dup=(ledger||[]).some(r=>r.key&&r.key===p.key);
+                 return Promise.resolve({json:async()=>({status:dup?'skipped':'success',row:99})}); }
+          return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},
+            ledger:ledger||[],monthly:{},ledgerMonths:[],
+            cash:{balance:20000,anchorDate:iso(mAgo(6,1)),anchorAmount:20000,hasAnchor:true,
+                  bookStart:iso(mAgo(6,1))},
+            savings:[],bond:[],notices:[],hsa:null,retire:[],config:{},property:null,car:car,rsu:null,
+            stockHistory:[],serverDate:iso(T)})}); };
+        w.alert=(m)=>{ w.__alert=m; }; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, calls};
+  }
+  const txt=(w,id)=>w.document.getElementById(id).textContent;
+
+  // ① 还款表：用你给的数（46,097 / 1.49% / 60 期）
+  let {w,calls}=app(Object.assign({},C0,{firstPay:iso(mAgo(-1,5))}));   // 下个月才开始还
+  await wait(600);
+  const S=JSON.parse(w.eval("JSON.stringify(carSchedule())"));
+  ok('月供按公式 = $797.73', w.eval("carPayment()")===797.73, String(w.eval("carPayment()")));
+  ok('一共 60 期', S.length===60);
+  ok('第一期利息 = 46097 × 1.49% ÷ 12 = $57.24', S[0].interest===57.24, String(S[0].interest));
+  ok('最后一期还完余额归零', S[59].balAfter===0, String(S[59].balAfter));
+  const sumP=Math.round(S.reduce((a,p)=>a+p.principal,0)*100)/100;
+  const sumI=Math.round(S.reduce((a,p)=>a+p.interest,0)*100)/100;
+  ok('60 期还本合计 = 贷款额 46,097', sumP===46097, String(sumP));
+  ok('全部利息约 $1,767（与公式值 1767.03 相差 < $1）', Math.abs(sumI-1767.03)<1, String(sumI));
+  ok('最后一期补零头：和标准月供相差不到 $1', Math.abs(S[59].pay-797.73)<1, String(S[59].pay));
+  ok('每期落在同一天', S.every(p=>p.date.slice(8)===pad2(5)));
+  ok('还没开始还：余额 = 贷款额', w.eval("carBalance()")===46097);
+  ok('还没开始还：不记账', !calls.some(c=>c.action==='autoLedger'));
+  ok('总览有车贷卡片，显示余额和期数',
+     /车贷/.test(txt(w,'carslot')) && /\$46,097/.test(txt(w,'carslot')) && /0\/60 期/.test(txt(w,'carslot')),
+     txt(w,'carslot'));
+
+  // ② 31 号开始：小月按月末扣
+  w.eval("Object.assign(CAR,{firstPay:'2027-01-31'})");
+  const d31=JSON.parse(w.eval("JSON.stringify(carSchedule().slice(0,3).map(p=>p.date))"));
+  ok('31 号扣款，2 月按月末', d31.join(',')==='2027-01-31,2027-02-28,2027-03-31', d31.join(','));
+
+  // ③ 三个月前开始（每月 1 号）：已扣 4 期，60 天内的自动记账
+  const first=iso(mAgo(3,1));
+  ({w,calls}=app(Object.assign({},C0,{firstPay:first})));
+  await wait(800);
+  const paid=JSON.parse(w.eval("JSON.stringify(carPaid())"));
+  ok('已扣 4 期', paid.length===4, paid.map(p=>p.date).join(','));
+  ok('余额 = 第 4 期之后的剩余', w.eval("carBalance()")===paid[3].balAfter, String(w.eval("carBalance()")));
+  const floor=new Date(T); floor.setDate(floor.getDate()-60);
+  const expect=paid.filter(p=>new Date(p.date+'T00:00:00')>=floor);
+  const rec=calls.filter(c=>c.action==='autoLedger');
+  ok('60 天内的每期都记了一笔', rec.length===expect.length && expect.length>=2,
+     `${rec.length} 笔，应 ${expect.length}`);
+  ok('记进 Auto & Gas，金额 = 整期月供 $797.73',
+     rec.every(c=>c.category==='Auto & Gas' && +c.amount===797.73 && c.note==='车贷月供'));
+  ok('key = car:年-月', rec.every(c=>c.key==='car:'+c.date.slice(0,7)));
+  ok('现金同步扣掉', w.eval("cashInfo.balance")===Math.round((20000-797.73*expect.length)*100)/100,
+     String(w.eval("cashInfo.balance")));
+  ok('算进本月 Auto & Gas 支出', (w.eval("monthExpense['Auto & Gas']")||0)>=797.73,
+     String(w.eval("monthExpense['Auto & Gas']")));
+
+  // ④ 已记过的不重发
+  const done=rec.map(c=>({row:1,date:c.date,category:c.category,amount:+c.amount,note:c.note,key:c.key}));
+  let b=app(Object.assign({},C0,{firstPay:first}), done); await wait(700);
+  ok('已记过的期数不再重发', !b.calls.some(c=>c.action==='autoLedger'));
+
+  // ⑤ 车贷页 + 还款记录
+  w.go('car');
+  ok('车贷页：余额、下一期、买车总账',
+     txt(w,'car-body').includes('$'+w.fmt(paid[3].balAfter)) && /第 5 期/.test(txt(w,'car-body')) &&
+     /首付/.test(txt(w,'car-body')) && /\$8,000\.00/.test(txt(w,'car-body')));
+  ok('总共要付 = 首付 + 全部月供',
+     txt(w,'car-body').includes(w.money(8000+S.reduce((a,p)=>a+p.pay,0))));
+  w.openCarHistory();
+  const hr=w.document.querySelectorAll('#car-body .hist-row');
+  ok('还款记录 4 行，从新到旧', hr.length===4 && hr[0].textContent.includes(paid[3].date.replace(/-/g,'/')),
+     hr.length+' '+(hr[0]&&hr[0].textContent));
+  ok('每行有 日期 / 本金剩余 / 还款额',
+     hr[0].textContent.includes(w.money(paid[3].balAfter)) && hr[0].textContent.includes('$797.73'));
+  w.goBackOne();
+  ok('右滑返回先回车贷页', /买车总账/.test(txt(w,'car-body')) &&
+     w.document.querySelector('.screen.active').id==='scr-car');
+  w.openCarHistory(); w.go('overview'); w.go('car');
+  ok('从总览重新进来先看车贷主页', /买车总账/.test(txt(w,'car-body')));
+
+  // ⑥ 合同月供与公式不同：按合同的扣
+  w.eval("CAR.payment=800");
+  const S2=JSON.parse(w.eval("JSON.stringify(carSchedule())"));
+  ok('填了合同月供就按合同扣', S2[0].pay===800 && S2[S2.length-1].balAfter===0 && S2.length<=60,
+     S2.length+' 期');
+
+  // ⑦ 没有车贷：总览是「添加车贷」，表单提示差额，保存写回
+  let e=app(null); await wait(500);
+  ok('没有车贷时总览显示「添加车贷」', /添加车贷/.test(txt(e.w,'carslot')));
+  e.w.go('car'); e.w.showCarForm();
+  const setv=(id,v)=>{ e.w.document.getElementById(id).value=v; };
+  setv('c-price','54346.70'); setv('c-down','8000'); setv('c-loan','46097'); setv('c-apr','1.49');
+  setv('c-months','60'); setv('c-first',first);
+  e.w.carFormHint();
+  const hint=txt(e.w,'c-hint');
+  ok('表单提示公式月供', hint.includes('$797.73'), hint);
+  ok('表单提示车价 − 首付 与贷款额差 $249.70', hint.includes('$249.70'), hint);
+  e.w.saveCarForm(); await wait(500);
+  const sv=e.calls.find(c=>c.action==='saveCar');
+  ok('保存写回 Sheet', sv && sv.loan==='46097' && sv.apr==='1.49' && sv.firstPay===first && sv.payment==='0',
+     JSON.stringify(sv));
+  ok('保存后立刻补记已到期的月供', e.calls.filter(c=>c.action==='autoLedger').length===expect.length);
+  ok('保存后总览卡片更新', /\$/.test(txt(e.w,'carslot')) && /4\/60 期/.test(txt(e.w,'carslot')), txt(e.w,'carslot'));
+
+  // ⑧ 后端：读的时候就建表；保存；余额与前端一致；Sheet 上留空月供 = 按公式
+  const tabs={Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+    Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+    Anchor:mkSheet('Anchor',[['date','amount','note']]),
+    Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+    Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+    Ledger_monthly:mkSheet('Ledger_monthly',[])};
+  const g=backend(tabs);
+  const r0=J(g.doGet({parameter:{}}));
+  ok('只打开不保存也会建出 Car 表', !!tabs.Car && tabs.Car._rows.some(r=>r[0]==='firstPay'));
+  ok('空表返回 car = null', r0.car===null);
+  J(g.doGet({parameter:{action:'saveCar', price:'54346.7', down:'8000', loan:'46097', apr:'1.49',
+                        months:'60', payment:'0', firstPay:first}}));
+  const bc=J(g.doGet({parameter:{}})).car;
+  ok('后端读回全部字段', bc.loan===46097 && bc.apr===1.49 && bc.months===60 && bc.firstPay===first && !bc.payment,
+     JSON.stringify(bc));
+  ok('后端 balanceNow 与前端余额一致', bc.balanceNow===paid[3].balAfter, `${bc.balanceNow} vs ${paid[3].balAfter}`);
+  ok('balanceNow 写进 Sheet', tabs.Car._rows.some(r=>r[0]==='balanceNow(自动算)' && r[1]===bc.balanceNow));
+  J(g.doGet({parameter:{action:'saveCar', payment:'800'}}));
+  J(g.doGet({parameter:{action:'saveCar', payment:'0'}}));
+  ok('月供可以改回留空（按公式算）', !J(g.doGet({parameter:{}})).car.payment);
+}

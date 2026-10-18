@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V8.1  (2026-10-17)
+ * 资产驾驶舱 · Google Apps Script 后端  V9.0  (2026-10-17)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,16 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V9.0 2026-10-17  新模块：车贷
+ *   · 新增 Car 表（脚本自建，读路径里就建）：A:Field B:Value，
+ *     字段 price / down / loan / apr / months / payment / firstPay，
+ *     外加一行 balanceNow(自动算)，只给人看
+ *   · 新增 action saveCar，readAll 返回 car（含 balanceNow）
+ *   · carBalanceNow 与前端 carSchedule 同一套等额本息算法
+ *   · 每期月供由前端用 autoLedger 记进 Auto & Gas，key = car:年-月，
+ *     后端无需改动记账逻辑
+ *   · 每次打开多 2 次表读取（getSheetByName + 整表读一遍），余额变了才多 1 次写
  *
  * V8.1 2026-10-17  房产页加「还款记录」
  *   · readAll 新增 mtgOld：ledger 明细窗口（当月+上月+近 70 天）之外的房贷流水
@@ -261,6 +271,7 @@ function handleActionInner(data) {
     case "updateHsa":    return updateHsa(ss, data);
     case "saveConfig":   return saveConfig(ss, data);
     case "saveProperty": return saveProperty(ss, data);
+    case "saveCar":      return saveCar(ss, data);
     case "saveRsu":      return saveRsu(ss, data);
 
     case "updateStock": return updateStock(ss, data);
@@ -1348,6 +1359,109 @@ function saveProperty(ss, data) {
            property: safeRun(function () { return readProperty(ss); }, null) };
 }
 
+// ==================== Car（车贷）====================
+// A:Field  B:Value，和 Property 一样的键值表，可以直接在 Sheet 里看和改。
+//
+//   price     车价（含税和首年注册），只用于展示
+//   down      首付
+//   loan      贷款额（financed amount）
+//   apr       年利率（%）
+//   months    期数
+//   payment   月供；留空 = 按等额本息公式算
+//   firstPay  首次还款日；之后每月同一天扣。留空 = 还没开始还
+//
+// 固定本金、固定利率、不提前还款，整张还款表由这几个数完全决定，不需要锚点。
+// 另写一行 balanceNow(自动算)，只给人看，从不读回来。
+var CAR_FIELDS = ["price","down","loan","apr","months","payment","firstPay"];
+
+// 建表时字段一律留空（理由同 propertySheet：0 是有效值，会覆盖小程序里的数）
+function carSheet(ss) {
+  var sh = ss.getSheetByName("Car");
+  if (!sh) {
+    sh = ss.insertSheet("Car");
+    var rows = [["Field", "Value"]];
+    for (var i = 0; i < CAR_FIELDS.length; i++) rows.push([CAR_FIELDS[i], ""]);
+    sh.getRange(1, 1, rows.length, 2).setValues(rows);
+  }
+  return sh;
+}
+
+// 读 + 回写 balanceNow 一次完成：整表只读一遍，余额没变就不写
+function runCar(ss) {
+  var sh = carSheet(ss);
+  var v = sh.getDataRange().getValues();
+  var out = {}, got = false, balRow = -1, balOld = null;
+  for (var i = 1; i < v.length; i++) {
+    var k = (v[i][0] || "").toString().trim();
+    if (k === "balanceNow(自动算)") { balRow = i + 1; balOld = v[i][1]; continue; }
+    if (CAR_FIELDS.indexOf(k) < 0) continue;
+    var raw = v[i][1];
+    if (raw === "" || raw == null) continue;
+    if (k === "firstPay") {
+      var d = s2d(raw);
+      out[k] = (d && !isNaN(d.getTime())) ? d2s(d) : raw.toString().trim();
+    } else {
+      out[k] = parseFloat(raw) || 0;
+    }
+    got = true;
+  }
+  if (!got) return null;
+  out.balanceNow = carBalanceNow(out);
+  if (balRow < 0) sh.appendRow(["balanceNow(自动算)", out.balanceNow]);
+  else if ((parseFloat(balOld) || 0) !== out.balanceNow) sh.getRange(balRow, 2).setValue(out.balanceNow);
+  return out;
+}
+
+function carR2(n) { return Math.round(n * 100) / 100; }
+function carPaymentOf(c) {
+  if (c.payment > 0) return +c.payment;
+  var P = +c.loan || 0, n = +c.months || 0, r = (+c.apr || 0) / 100 / 12;
+  if (!(P > 0) || !(n > 0)) return 0;
+  return carR2(r > 0 ? P * r / (1 - Math.pow(1 + r, -n)) : P / n);
+}
+// 截至今天的余额。与前端 carSchedule 同一套算法，改一边必须改另一边：
+// 每期利息按分取整，最后一期补齐零头，31 号在小月按月末算
+function carBalanceNow(c) {
+  var bal = +c.loan || 0;
+  var pay = carPaymentOf(c), n = +c.months || 0, r = (+c.apr || 0) / 100 / 12;
+  var f = c.firstPay ? s2d(c.firstPay) : null;
+  if (!f || isNaN(f.getTime()) || !(bal > 0) || !(pay > 0)) return carR2(bal);
+  var today = todaySv(), day = f.getDate();
+  for (var k = 0; k < n && bal > 0.004; k++) {
+    var last = new Date(f.getFullYear(), f.getMonth() + k + 1, 0).getDate();
+    var d = new Date(f.getFullYear(), f.getMonth() + k, Math.min(day, last));
+    if (d > today) break;
+    var interest = carR2(bal * r);
+    var principal = carR2(pay - interest);
+    if (principal <= 0) break;
+    if (k === n - 1 || principal > bal) principal = bal;
+    bal = carR2(bal - principal);
+  }
+  return bal;
+}
+
+function saveCar(ss, data) {
+  var sh = carSheet(ss);
+  var last = sh.getLastRow();
+  var have = {};
+  if (last > 1) {
+    var keys = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (var i = 0; i < keys.length; i++) have[(keys[i][0] || "").toString().trim()] = i + 2;
+  }
+  for (var j = 0; j < CAR_FIELDS.length; j++) {
+    var f = CAR_FIELDS[j];
+    if (data[f] == null) continue;
+    // 月供、首次还款日允许清空（清空 = 按公式算 / 还没开始）；其余字段空值不覆盖
+    if (data[f] === "" && f !== "payment" && f !== "firstPay") continue;
+    var val = (f === "firstPay") ? data[f].toString().trim()
+            : (f === "payment" && (data[f] === "" || +data[f] === 0)) ? ""
+            : (parseFloat(data[f]) || 0);
+    if (have[f]) sh.getRange(have[f], 2).setValue(val);
+    else { sh.appendRow([f, val]); have[f] = sh.getLastRow(); }
+  }
+  return { status: "success", type: "saveCar", car: safeRun(function () { return runCar(ss); }, null) };
+}
+
 // ==================== RSU（雇主股，按归属批次）====================
 // A:Grant  B:Vest Date  C:Shares  D:Vest Price  E:Note
 // 一行一个归属批次。Vest Date 到了就算已归属；未归属的 Vest Price 可留空。
@@ -1837,6 +1951,7 @@ function readAllInner(force) {
              if (p) p.balanceNow = writePropBalance(ss, p);
              return p;
            }, null),
+           car: safeRun(function () { return runCar(ss); }, null),
            retire: readTab(ss, "Retire"),
            serverDate: Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd") };
 }

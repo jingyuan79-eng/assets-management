@@ -22,6 +22,7 @@
     --retire:#4A90A4; --retire-bg:#D8E6EA; --retire-ln:#b6e9e3;
     --hsa:#e0692f; --hsa-bg:#fcece2; --hsa-ln:#f7d2bd;
     --prop:#db2777;   --prop-bg:#fce7f1;   --prop-ln:#f8cbdf;
+    --car:#4b5d73;    --car-bg:#e9edf3;    --car-ln:#d2dae5;
   }
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
   html,body{background:var(--bg);color:var(--ink);
@@ -191,6 +192,7 @@
   <div class="allocbar" id="allocbar"></div>
   <div class="classlist" id="classlist"></div>
   <div id="propslot"></div>
+  <div id="carslot"></div>
   <div class="foot">
     <div class="badge" id="syncBadge">同步中…</div><br>
     <div id="appVer" style="text-align:center;font-size:10px;color:var(--ink-faint);margin-top:6px"></div>
@@ -212,6 +214,14 @@
     <span class="title">房产</span>
   </div>
   <div id="prop-body"></div>
+</div>
+
+<div class="screen" id="scr-car">
+  <div class="nav">
+    <button class="back" style="color:var(--car)" onclick="go('overview')">&lsaquo; 总览</button>
+    <span class="title">车贷</span>
+  </div>
+  <div id="car-body"></div>
 </div>
 
 <div class="screen" id="scr-transfer">
@@ -292,6 +302,34 @@ const PROPERTY = {
   autoFrom:""      // 从哪天起自动记；之前的期数不补，避免和旧的固定支出重复
 };
 try{ const sp=JSON.parse(localStorage.getItem('property_v1')||'null'); if(sp) Object.assign(PROPERTY,sp); }catch(e){}
+// 车贷：固定本金、固定利率、固定期数，不提前还款 —— 整张还款表由这几个数完全决定，
+// 不需要房贷那样的锚点。参数以 Sheet 的 Car 表为准，本地不留种子。
+const CAR = {
+  price:0,      // 车价（含税和首年注册），只用于展示
+  down:0,       // 首付
+  loan:0,       // 贷款额（financed amount）
+  apr:0,        // 年利率 %
+  months:60,    // 期数
+  payment:0,    // 月供；0 = 按标准等额本息公式算
+  firstPay:""   // 首次还款日；之后每月同一天扣。留空 = 还没开始还
+};
+try{ const sc=JSON.parse(localStorage.getItem('car_v1')||'null'); if(sc) Object.assign(CAR,sc); }catch(e){}
+function persistCar(){
+  try{ localStorage.setItem('car_v1', JSON.stringify(CAR)); }catch(e){}
+  apiWrite(Object.assign({action:'saveCar'}, CAR));
+}
+function rebuildCar(info){
+  if(!info || !info.loan){
+    if(CAR.loan) apiWrite(Object.assign({action:'saveCar'}, CAR));   // Sheet 上还没有 → 传上去
+    return;
+  }
+  Object.keys(info).forEach(function(k){
+    if(k in CAR && info[k]!=null && info[k]!=='') CAR[k]=info[k];
+  });
+  // 这两格在 Sheet 上留空是有意义的（按公式算 / 还没开始还），不能沿用本地旧值
+  CAR.payment=info.payment||0; CAR.firstPay=info.firstPay||'';
+  try{ localStorage.setItem('car_v1', JSON.stringify(CAR)); }catch(e){}
+}
 function persistProp(){
   try{ localStorage.setItem('property_v1', JSON.stringify(PROPERTY)); }catch(e){}
   // Sheet 才是真相源；本地只是快取，换设备/清数据都不影响
@@ -442,7 +480,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V8.1';
+const APP_VER='V9.0';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -573,7 +611,7 @@ function saveSheetCache(data){
       ts: Date.now(),
       savings: data.savings, bond: data.bond, cash: data.cash, hsa: data.hsa,
       property: data.property, stockHistory: data.stockHistory, rsu: data.rsu,
-      ledger: data.ledger, mtgOld: data.mtgOld, monthly: data.monthly,
+      car: data.car, ledger: data.ledger, mtgOld: data.mtgOld, monthly: data.monthly,
       ledgerMonths: data.ledgerMonths, notices: data.notices
     }));
   }catch(e){ console.log('缓存写入失败', e); }   // 隐私模式下 setItem 会抛异常
@@ -593,6 +631,7 @@ function loadSheetCache(){
   rebuildBonds(c.bond);
   rebuildHsa(c.hsa);
   rebuildProperty(c.property);
+  rebuildCar(c.car);
   stockHistory = Array.isArray(c.stockHistory) ? c.stockHistory : [];
   rsuInfo = c.rsu || null;
   rebuildMonthExpense();
@@ -636,6 +675,7 @@ function syncStockFromSheet(){
       syncOk = true;
       syncConfigFromSheet(data.config);   // 设置以 Sheet 为准，先落到本地再往下走
       rebuildProperty(data.property);
+      rebuildCar(data.car);
       stockHistory = Array.isArray(data.stockHistory) ? data.stockHistory : [];
       rsuInfo = data.rsu || null;
       cacheTs = 0;                // 拿到新数据，屏幕上不再是缓存
@@ -654,6 +694,7 @@ function syncStockFromSheet(){
         .then(function(){ return runPayroll(); })
         .then(function(){ return runHsaContrib(); })
         .then(function(){ return runMortgage(); })
+        .then(function(){ return runCarLoan(); })
         .then(function(){
           runRecurring();
           rebuildMonthExpense();
@@ -1316,6 +1357,7 @@ function renderOverview(){
   ORDER_TAX.forEach(k=>buildCard(list,k,false,false,safeGrand));
 
   renderPropCard();
+  renderCarCard();
   renderSemi();
   renderNotices();
 }
@@ -1835,6 +1877,244 @@ function saveLump(){
   doTransfer(src,'mortgage',amt);
   document.getElementById('propEditWrap').innerHTML='';
   recompute(); renderPropPage(); renderPropCard();
+}
+
+// ==================== 车贷 ====================
+// 等额本息：每月同一天扣同样的月供，最后一期把零头补齐。
+// 整期月供记进 Auto & Gas（车不像房子那样算净值，还掉的本金不会变成看得见的资产，
+// 按「每月养车花多少钱」看最直观）。与后端 carSchedule 同一套算法，改一边必须改另一边。
+const CAR_CAT='Auto & Gas';
+function money(n){ return '$'+(+n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function r2(n){ return Math.round(n*100)/100; }
+function carPayment(){
+  if(CAR.payment>0) return +CAR.payment;
+  const P=+CAR.loan||0, n=+CAR.months||0, r=(+CAR.apr||0)/100/12;
+  if(!(P>0) || !(n>0)) return 0;
+  return r2(r>0 ? P*r/(1-Math.pow(1+r,-n)) : P/n);
+}
+function carPayDate(k){             // 第 k 期（0 起）的扣款日；31 号在小月按月末算
+  const f=dateOf(CAR.firstPay), day=f.getDate();
+  const y=f.getFullYear(), m=f.getMonth()+k;
+  const last=new Date(y,m+1,0).getDate();
+  return new Date(y,m,Math.min(day,last));
+}
+function carSchedule(){
+  const out=[], n=+CAR.months||0, pay=carPayment(), r=(+CAR.apr||0)/100/12;
+  if(!CAR.firstPay || !(CAR.loan>0) || !(pay>0)) return out;
+  let bal=+CAR.loan;
+  for(let k=0;k<n && bal>0.004;k++){
+    const interest=r2(bal*r);
+    let principal=r2(pay-interest);
+    if(principal<=0) break;                       // 月供不够付利息
+    if(k===n-1 || principal>bal) principal=bal;   // 最后一期补齐零头
+    bal=r2(bal-principal);
+    out.push({n:k+1, date:fmtD(carPayDate(k)), interest:interest, principal:principal,
+              pay:r2(interest+principal), balAfter:bal});
+  }
+  return out;
+}
+function carPaid(){                 // 截至今天已经扣过的期数
+  const t=fmtD(todayD());
+  return carSchedule().filter(function(p){ return p.date<=t; });
+}
+function carBalance(){
+  const done=carPaid();
+  return done.length ? done[done.length-1].balAfter : (+CAR.loan||0);
+}
+
+function renderCarCard(){
+  const el=document.getElementById('carslot'); if(!el) return;
+  if(!(CAR.loan>0)){
+    el.innerHTML='<div class="addbox" style="border-color:var(--car-ln);background:var(--car-bg);margin:0 0 18px" onclick="go(\'car\');showCarForm()">'+
+      '<div class="plus" style="color:var(--car)">＋</div><div class="lbl">添加车贷</div></div>';
+    return;
+  }
+  const done=carPaid().length, n=carSchedule().length||CAR.months;
+  const meta = !CAR.firstPay ? '月供 '+money(carPayment())+' · 还没开始还款'
+             : done>=n ? '已还清'
+             : '月供 '+money(carPayment())+' · 已还 '+done+'/'+n+' 期';
+  el.innerHTML=
+    '<div class="ccard" style="background:var(--car-bg);border-color:var(--car-ln);margin-bottom:18px" onclick="go(\'car\')">'+
+    '<span class="cbar" style="background:var(--car)"></span>'+
+    '<div class="mid"><div class="nm">车贷</div><div class="meta">'+meta+'</div></div>'+
+    '<div class="amt"><div class="mv">$'+fmt(carBalance())+'</div><div class="pc" style="color:var(--car)">不计入</div></div>'+
+    '<span class="chev" style="color:var(--car)">&rsaquo;</span></div>';
+}
+
+let carDrill=null;                  // null=车贷主页；'history'=还款记录
+function openCarHistory(){ carDrill='history'; renderCarPage(); window.scrollTo(0,0); }
+function closeCarHistory(){ carDrill=null; renderCarPage(); window.scrollTo(0,0); }
+
+function renderCarPage(){
+  const body=document.getElementById('car-body'); if(!body) return;
+  if(carDrill==='history'){ renderCarHistory(body); return; }
+  if(!(CAR.loan>0)){
+    body.innerHTML='<div class="placeholder" style="margin-bottom:14px">还没有车贷数据。点下面「编辑车贷」填一次即可。</div>'+
+      carActions()+'<div id="carEditWrap"></div>';
+    return;
+  }
+  const S=carSchedule(), done=carPaid(), bal=carBalance();
+  const pay=carPayment(), n=S.length||CAR.months;
+  const next=S[done.length]||null;
+  const paidPrin=r2((+CAR.loan)-bal);
+  const progress=CAR.loan>0 ? Math.min(100,paidPrin/CAR.loan*100) : 0;
+  const totalInt=S.reduce(function(a,p){ return a+p.interest; },0);
+  const restInt=S.slice(done.length).reduce(function(a,p){ return a+p.interest; },0);
+  const totalPay=S.reduce(function(a,p){ return a+p.pay; },0);
+  const last=S.length ? dateOf(S[S.length-1].date) : null;
+  const row=(l,sub,v,c)=>'<div class="row" style="border-color:var(--car-ln)">'+
+    '<div class="tk" style="width:auto;flex:1"><div class="sym" style="font-size:13px">'+l+'</div>'+
+    (sub?'<div class="qty">'+sub+'</div>':'')+'</div>'+
+    '<div class="val"><div class="mv"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div></div></div>';
+  const grp=(title,right,inner)=>'<div class="group" style="background:var(--car-bg);border-color:var(--car-ln)">'+
+    '<div class="grp-head" style="border-color:var(--car-ln)"><div class="cat">'+title+'</div>'+
+    (right?'<span class="gpc" style="color:var(--car)">'+right+'</span>':'')+'</div>'+inner+'</div>';
+  const fp=CAR.firstPay?dateOf(CAR.firstPay):null;
+
+  body.innerHTML=
+    '<div class="dhero dark" style="border-color:var(--car)">'+
+      '<div class="l" style="color:var(--car)">车贷余额 · 不计入投资总额</div>'+
+      '<div class="v num"><span class="cur">$</span>'+fmt(bal)+'</div>'+
+      '<div class="s">年利率 '+(+CAR.apr||0)+'% · '+n+' 期 · 原贷 $'+fmt(CAR.loan)+'</div></div>'+
+
+    grp('每月还款', money(pay),
+      row('月供', fp ? ('每月 '+fp.getDate()+' 号 · 自动记入 '+CAR_CAT) : '填了首次还款日后每月自动记账', money(pay))+
+      (!fp ? row('首次还款日','还没填','—','var(--ink-faint)')
+       : next ? row('下一期 · '+next.date.slice(5).replace('-','/')+'（第 '+next.n+' 期）',
+                    '利息 '+money(next.interest)+' · 还本 '+money(next.principal), money(next.pay))
+       : row('已还清', last?ymCN(last):'', '✓', 'var(--pos)')))+
+
+    grp('还款进度', done.length+'/'+n+' 期',
+      '<div style="padding:12px 14px 4px">'+
+        '<div style="height:8px;background:#0002;border-radius:4px;overflow:hidden">'+
+          '<div style="height:100%;width:'+progress.toFixed(1)+'%;background:var(--car)"></div></div>'+
+        '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--ink-2)">'+
+          '<span>已还本金 $'+fmt(paidPrin)+'</span><span>原贷 $'+fmt(CAR.loan)+'</span></div></div>'+
+      row('剩余利息','还清前还要付的利息', money(restInt))+
+      (last ? row('预计还清', '最后一期 '+S[S.length-1].date.replace(/-/g,'/'), ymCN(last)) : '')+
+      '<div class="row" style="border-color:var(--car-ln);cursor:pointer" onclick="openCarHistory()">'+
+        '<div class="tk" style="width:auto;flex:1"><div class="sym" style="font-size:13px">还款记录</div>'+
+        '<div class="qty">'+(done.length?('共 '+done.length+' 笔'):'还没有记录')+'</div></div>'+
+        '<div class="val"><div class="mv" style="color:var(--car)">查看 &rsaquo;</div></div></div>')+
+
+    grp('买车总账', '',
+      (CAR.price>0 ? row('车价','含税和首年注册', money(CAR.price)) : '')+
+      (CAR.down>0 ? row('首付','', money(CAR.down)) : '')+
+      row('贷款额','', money(CAR.loan))+
+      row('全部利息', n+' 期合计', money(totalInt))+
+      row('总共要付','首付 + 全部月供', money((+CAR.down||0)+totalPay)))+
+    carActions()+
+    '<div id="carEditWrap"></div>';
+}
+function carActions(){
+  return '<div class="addbox" style="margin:4px 0 0;border-color:var(--car-ln);background:var(--car-bg)" onclick="showCarForm()">'+
+    '<div class="plus" style="color:var(--car)">✎</div><div class="lbl">编辑车贷</div></div>';
+}
+function renderCarHistory(body){
+  const list=carPaid().slice().reverse();
+  const total=list.reduce(function(a,p){ return a+p.pay; },0);
+  let html=
+    '<div style="display:flex;align-items:center;gap:10px;margin:2px 2px 12px">'+
+      '<button style="background:none;border:none;font-size:15px;font-weight:600;color:var(--car);font-family:inherit;cursor:pointer;padding:4px 6px 4px 0" onclick="closeCarHistory()">&lsaquo; 车贷</button>'+
+      '<div style="flex:1;font-size:14px;font-weight:600">还款记录</div>'+
+      '<div class="num" style="font-size:15px;font-weight:600">$'+fmt(total)+'</div>'+
+    '</div>';
+  if(!list.length){
+    html+='<div class="placeholder">'+(CAR.firstPay
+      ? '还没有还款记录。首次还款日 '+CAR.firstPay.replace(/-/g,'/')+' 之后会出现在这里'
+      : '还没填首次还款日')+'</div>';
+  }else{
+    const cell='font-size:11px;color:var(--ink-faint)';
+    html+='<div class="group" style="background:var(--car-bg);border-color:var(--car-ln)">'+
+      '<div class="row" style="border-color:var(--car-ln);padding-top:8px;padding-bottom:8px">'+
+        '<div class="tk" style="width:88px"><div style="'+cell+'">日期</div></div>'+
+        '<div class="desc" style="'+cell+'">本金剩余</div>'+
+        '<div class="val"><div style="'+cell+'">还款额</div></div></div>'+
+      list.map(function(p){
+        return '<div class="row hist-row" style="border-color:var(--car-ln)">'+
+          '<div class="tk" style="width:88px"><div class="sym" style="font-size:13px">'+p.date.replace(/-/g,'/')+'</div>'+
+            '<div class="qty">第 '+p.n+' 期</div></div>'+
+          '<div class="desc">'+money(p.balAfter)+'</div>'+
+          '<div class="val"><div class="mv">'+money(p.pay)+'</div>'+
+            '<div class="pc">利息 '+money(p.interest)+' · 还本 '+money(p.principal)+'</div></div></div>';
+      }).join('')+'</div>';
+  }
+  body.innerHTML=html;
+}
+
+function showCarForm(){
+  const wrap=document.getElementById('carEditWrap');
+  if(!wrap) return;
+  if(wrap.innerHTML){ wrap.innerHTML=''; return; }
+  const C=CAR;
+  const fld=(id,label,val,ph,type)=>'<div class="fld"><label>'+label+'</label>'+
+    '<input id="'+id+'" type="'+(type||'number')+'" inputmode="decimal" value="'+(val==null?'':val)+'"'+
+    (ph?' placeholder="'+ph+'"':'')+(type?'':' oninput="carFormHint()"')+'></div>';
+  const half=(a,b)=>'<div style="display:flex;gap:8px"><div style="flex:1">'+a+'</div><div style="flex:1">'+b+'</div></div>';
+  wrap.innerHTML=
+    '<div class="editform" style="border-color:var(--car-ln)">'+
+      fld('c-price','车价（含税和首年注册）($)',C.price||'')+
+      half(fld('c-down','首付 ($)',C.down||''), fld('c-loan','贷款额 ($)',C.loan||''))+
+      half(fld('c-apr','年利率 APR (%)',C.apr||''), fld('c-months','期数（月）',C.months||60))+
+      half(fld('c-pay','月供 ($)',C.payment||'','留空自动算'),
+           fld('c-first','首次还款日',C.firstPay||'','','date'))+
+      '<div id="c-hint" style="font-size:11px;color:var(--ink-faint);margin:-4px 0 10px"></div>'+
+      '<div class="btns">'+
+        '<button class="cancel" onclick="document.getElementById(\'carEditWrap\').innerHTML=\'\'">取消</button>'+
+        '<button class="save" style="background:var(--car)" onclick="saveCarForm()">保存</button>'+
+      '</div></div>';
+  carFormHint();
+  wrap.scrollIntoView({behavior:'smooth',block:'center'});
+}
+// 表单下方实时提示：按公式算出的月供，以及车价 − 首付 和贷款额对不上的差额
+function carFormHint(){
+  const el=document.getElementById('c-hint'); if(!el) return;
+  const num=id=>parseFloat(document.getElementById(id).value);
+  const P=num('c-loan'), n=num('c-months'), r=(num('c-apr')||0)/100/12;
+  const price=num('c-price'), down=num('c-down');
+  const tips=[];
+  if(P>0 && n>0) tips.push('按公式月供 '+money(r>0?P*r/(1-Math.pow(1+r,-n)):P/n)+'；合同上的月供不同就填合同的');
+  if(price>0 && down>=0 && P>0 && Math.abs(price-down-P)>=0.01)
+    tips.push('车价 − 首付 = '+money(price-down)+'，比贷款额'+(price-down>P?'多 ':'少 ')+money(Math.abs(price-down-P)));
+  el.textContent=tips.join('。');
+}
+function saveCarForm(){
+  const num=id=>parseFloat(document.getElementById(id).value);
+  const price=num('c-price'), down=num('c-down'), loan=num('c-loan'), apr=num('c-apr'),
+        months=parseInt(document.getElementById('c-months').value,10), pay=num('c-pay'),
+        first=document.getElementById('c-first').value;
+  if(!(loan>0) || !(apr>=0) || !(months>0)){ alert('请至少填写贷款额、年利率和期数'); return; }
+  CAR.price=price>0?r2(price):0;
+  CAR.down=down>0?r2(down):0;
+  CAR.loan=r2(loan); CAR.apr=apr; CAR.months=months;
+  CAR.payment=pay>0?r2(pay):0;
+  CAR.firstPay=first||'';
+  document.getElementById('carEditWrap').innerHTML='';
+  persistCar();
+  renderCarPage(); renderCarCard(); recompute();
+  runCarLoan().then(function(){ renderCarPage(); refreshLedgerViews(); });
+}
+
+// 每到扣款日记一笔：整期月供 → Auto & Gas。key = car:年-月，服务器端查重
+function runCarLoan(){
+  const floor=bookFloor();
+  const todo=carPaid().filter(function(p){
+    return dateOf(p.date)>=floor && !ledgerHasKey('car:'+p.date.slice(0,7));
+  });
+  if(!todo.length) return Promise.resolve();
+  let chain=Promise.resolve();
+  todo.forEach(function(p){
+    const key='car:'+p.date.slice(0,7);
+    chain=chain.then(function(){
+      return apiWrite({action:'autoLedger', key:key, date:p.date,
+                       category:CAR_CAT, amount:p.pay, note:'车贷月供'}).then(function(res){
+        const nr={row:res&&res.row, date:p.date, category:CAR_CAT, amount:p.pay, note:'车贷月供', key:key};
+        ledgerRows.push(nr);
+        if(res && res.status==='success') applyCashDelta(signedOf(nr));
+      });
+    });
+  });
+  return chain.then(function(){ rebuildMonthExpense(); recompute(); });
 }
 
 // ==================== 储蓄 CD：增 / 改 / 删 ====================
@@ -3534,6 +3814,9 @@ function goBackOne(){
   if(cur.id==='scr-property' && propDrill){
     closePayHistory(); return;               // 还款记录先退回房产页
   }
+  if(cur.id==='scr-car' && carDrill){
+    closeCarHistory(); return;
+  }
   go('overview');
 }
 
@@ -3541,7 +3824,9 @@ function go(id){
   document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
   document.getElementById('scr-'+id).classList.add('active');
   if(id==='overview') currentDetailKey=null;
-  if(id==='property' && propDrill){ propDrill=null; renderPropPage(); }   // 从总览进来总是先看房产主页
+  // 每次进来都按最新数据重画，并且总是先看主页（不停在上次的还款记录里）
+  if(id==='property'){ propDrill=null; renderPropPage(); }
+  if(id==='car'){ carDrill=null; renderCarPage(); }
   window.scrollTo(0,0);
 }
 
@@ -3549,6 +3834,7 @@ function go(id){
 const hadCache = loadSheetCache();   // 先把上次的现金/储蓄/国债填进去，避免空等一次往返
 renderOverview();        // 先用本地数据渲染，避免白屏
 renderPropPage();
+renderCarPage();
 if(hadCache) setSyncBadge('stale', cacheTs);   // 明确标出：这是旧数据，正在更新
 syncStockFromSheet();    // 再拉 Sheet：结算固定支出、按月对账、工资、定期转账
 
