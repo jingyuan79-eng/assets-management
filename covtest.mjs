@@ -1935,3 +1935,114 @@ console.log('\n— 房产：每期还款 —');
   ok('新字段写进 Sheet：扣款日/自动记账/起始日',
      bp2.payDay===20 && bp2.autoPay===1 && bp2.autoFrom==='2026-11-01', JSON.stringify(bp2).slice(0,160));
 }
+
+// ══════════════ 二十七、房产：还款记录 ══════════════
+// 数据 = ledger 窗口内的房贷流水 + 后端 mtgOld（窗口之外的），两者不重叠。
+// 月供按 key 里的年月把利息行和还本行配成一期；剩余本金从当前余额往回倒推。
+console.log('\n— 房产：还款记录 —');
+{
+  const pad2=(n)=>String(n).padStart(2,'0');
+  const iso=(d)=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const T=new Date(); T.setHours(0,0,0,0);
+  const mAgo=(n,day)=>new Date(T.getFullYear(), T.getMonth()-n, day);
+  const ymOf=(d)=>iso(d).slice(0,7);
+  const P0={value:500000,loan:300000,origLoan:350000,rate:6,termYears:30,payment:2000,extra:500,
+            updated:iso(mAgo(3,10)),payDay:15,autoPay:0,autoFrom:''};   // 不开自动记账，免得测试里又补记一期
+  const d1=mAgo(1,15), d2=mAgo(2,15), d5=mAgo(5,15), d4=mAgo(4,20);
+  const LEDGER=[
+    {row:50,date:iso(d1),category:'Bill & utilities',amount:1490,note:'房贷利息',key:'mtg:'+ymOf(d1)+':int'},
+    {row:51,date:iso(d1),category:'Transfer · 房贷',amount:1010,note:'房贷还本',key:'mtg:'+ymOf(d1)+':prin'},
+    {row:40,date:iso(d2),category:'Bill & utilities',amount:1495,note:'房贷利息',key:'mtg:'+ymOf(d2)+':int'},
+    {row:41,date:iso(d2),category:'Transfer · 房贷',amount:1005,note:'房贷还本',key:'mtg:'+ymOf(d2)+':prin'},
+    {row:42,date:iso(d2),category:'Dining',amount:60,note:'',key:''},
+    {row:43,date:iso(d2),category:'Bill & utilities',amount:70,note:'网费',key:'fix:fn:'+iso(d2)}];
+  const OLD=[
+    {row:10,date:iso(d5),category:'Bill & utilities',amount:1520,note:'房贷利息',key:'mtg:'+ymOf(d5)+':int'},
+    {row:11,date:iso(d5),category:'Transfer · 房贷',amount:980,note:'房贷还本',key:'mtg:'+ymOf(d5)+':prin'},
+    {row:20,date:iso(d4),category:'Transfer · 房贷',amount:10000,note:'',key:''},
+    LEDGER[1]];                                   // 故意重叠一行：同一 row 只算一次
+  function app(mtgOld, prop){
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        w.fetch=(u)=>{ const a=new URL(u).searchParams.get('action');
+          if(a) return Promise.resolve({json:async()=>({status:'skipped'})});
+          const body={status:'success',stock:[],expense:{},ledger:LEDGER,monthly:{},ledgerMonths:[],
+            cash:{balance:20000,anchorDate:iso(mAgo(6,1)),anchorAmount:20000,hasAnchor:true,
+                  bookStart:iso(mAgo(6,1))},
+            savings:[],bond:[],notices:[],hsa:null,retire:[],config:{},property:prop||P0,rsu:null,
+            stockHistory:[],serverDate:iso(T)};
+          if(mtgOld) body.mtgOld=mtgOld;
+          return Promise.resolve({json:async()=>body}); };
+        w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return dom.window;
+  }
+
+  let w=app(OLD); await wait(600);
+  const H=JSON.parse(w.eval("JSON.stringify(payHistory())"));
+  ok('共 4 笔：近两期月供 + 5 个月前月供 + 一次性还本', H.length===4, H.map(x=>x.date+' '+x.kind).join(', '));
+  ok('非房贷流水（餐饮、网费）不算进来', !H.some(x=>x.pay===60||x.pay===70));
+  ok('按日期从新到旧', H.every((x,i)=>i===0||H[i-1].date>=x.date));
+  ok('同一期的利息和还本配成一笔：1490 + 1010 = 2500',
+     H[0].kind==='月供' && H[0].pay===2500 && H[0].interest===1490 && H[0].principal===1010, JSON.stringify(H[0]));
+  ok('重叠的那一行只算一次', H[0].principal===1010);
+  ok('一次性还本单独一笔 $10,000', H.some(x=>x.kind==='一次性还本' && x.pay===10000 && x.interest===0));
+  const cur=w.eval("amortizeNow()");
+  ok('最新一笔之后的剩余 = 当前余额', H[0].balAfter===cur, `${H[0].balAfter} vs ${cur}`);
+  ok('往前一笔的剩余 = 当前余额 + 最新一笔的还本', H[1].balAfter===cur+1010, String(H[1].balAfter));
+  ok('最早一笔的剩余 = 当前余额 + 之后所有还本',
+     H[3].balAfter===cur+1010+1005+10000, String(H[3].balAfter));
+
+  // 界面：房产页有入口，点开是明细，返回回到房产页
+  w.go('property'); w.renderPropPage();
+  const body=()=>w.document.getElementById('prop-body').textContent;
+  ok('房产页有「还款记录」入口，显示笔数', /还款记录/.test(body()) && /共 4 笔/.test(body()));
+  w.openPayHistory();
+  const rows=w.document.querySelectorAll('#prop-body .hist-row');
+  ok('明细页每笔一行', rows.length===4, String(rows.length));
+  const r0=rows[0].textContent;
+  ok('每行有 日期 / 本金剩余 / 还款额',
+     r0.includes(iso(d1).replace(/-/g,'/')) && r0.includes('$'+w.fmt(cur)) && r0.includes('$2,500'), r0);
+  ok('表头是 日期 / 本金剩余 / 还款额', /日期\s*本金剩余\s*还款额/.test(body()));
+  ok('明细页不显示房产主页内容', !/还清预估/.test(body()));
+  w.goBackOne();
+  ok('右滑返回先回到房产主页', /还清预估/.test(body()) && w.document.querySelector('.screen.active').id==='scr-property');
+  w.openPayHistory(); w.go('overview'); w.go('property');
+  ok('从总览重新进来先看房产主页', /还清预估/.test(body()));
+
+  // 缓存：mtgOld 跟其他数据一起进首屏缓存
+  const cache=JSON.parse(w.localStorage.getItem('sheetCache_v1')||'{}');
+  ok('mtgOld 写进首屏缓存', Array.isArray(cache.mtgOld) && cache.mtgOld.length===4);
+
+  // 后端没重新部署（没有 mtgOld）：只显示窗口内的，不报错
+  w=app(null); await wait(600);
+  ok('后端未更新时只显示近期两笔', w.eval("payHistory().length")===2);
+
+  // 没有任何记录时的提示
+  w=app([]); await wait(600);
+  w.eval("ledgerRows=[]"); w.go('property'); w.openPayHistory();
+  ok('没有记录且未开自动记账时提示原因',
+     /自动记账未开启/.test(w.document.getElementById('prop-body').textContent));
+
+  // 后端：mtgOld 只含窗口之外的房贷流水，与 ledger 不重叠
+  const da=(n)=>{ const d=new Date(T); d.setDate(d.getDate()-n); return iso(d); };
+  const tabs={
+    Ledger:mkSheet('Ledger',[['Date','category','amount','note','key'],
+      [da(150),'Bill & utilities',1520,'房贷利息','mtg:'+da(150).slice(0,7)+':int'],
+      [da(150),'Transfer · 房贷',980,'房贷还本','mtg:'+da(150).slice(0,7)+':prin'],
+      [da(120),'Transfer · 房贷',10000,'',''],
+      [da(120),'Dining',60,'',''],
+      [da(120),'Transfer · 券商',3000,'',''],
+      [da(5),'Transfer · 房贷',1010,'房贷还本','mtg:'+da(5).slice(0,7)+':prin']]),
+    Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+    Anchor:mkSheet('Anchor',[['date','amount','note'],[da(200),50000,'起点']]),
+    Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+    Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+    Ledger_monthly:mkSheet('Ledger_monthly',[])};
+  const res=J(backend(tabs).doGet({parameter:{}}));
+  const mo=res.mtgOld||[];
+  ok('后端 mtgOld：窗口外 3 笔房贷流水', mo.length===3, mo.map(x=>x.date+' '+x.category).join(', '));
+  ok('后端 mtgOld 不含餐饮、券商转账', !mo.some(x=>x.category==='Dining'||x.category==='Transfer · 券商'));
+  ok('后端 mtgOld 与 ledger 不重叠', !mo.some(x=>res.ledger.some(y=>y.row===x.row)));
+  ok('近期那笔还本仍在 ledger 里', res.ledger.some(x=>x.amount===1010 && x.category==='Transfer · 房贷'));
+}

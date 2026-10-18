@@ -442,13 +442,14 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V8.0';
+const APP_VER='V8.1';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
 
 let monthExpense = {};
 let ledgerRows = [];      // 当月+上月流水明细（来自 Sheet，可改可删）
+let mtgOld = [];          // ledger 窗口之外的房贷流水（只给还款记录用，和 ledgerRows 不重叠）
 let ledgerMonths = [];    // 后端声明「明细完整」的月份，只有这些月才允许由本地重算总计
 let monthlyTotals = {};   // 各月支出总计（Sheet 的 Monthly 表算好的）
 let syncOk = false;
@@ -572,7 +573,7 @@ function saveSheetCache(data){
       ts: Date.now(),
       savings: data.savings, bond: data.bond, cash: data.cash, hsa: data.hsa,
       property: data.property, stockHistory: data.stockHistory, rsu: data.rsu,
-      ledger: data.ledger, monthly: data.monthly,
+      ledger: data.ledger, mtgOld: data.mtgOld, monthly: data.monthly,
       ledgerMonths: data.ledgerMonths, notices: data.notices
     }));
   }catch(e){ console.log('缓存写入失败', e); }   // 隐私模式下 setItem 会抛异常
@@ -583,6 +584,7 @@ function loadSheetCache(){
   if(!c || !c.cash) return false;
   cacheTs = c.ts || 0;
   ledgerRows   = Array.isArray(c.ledger) ? c.ledger : [];
+  mtgOld       = Array.isArray(c.mtgOld) ? c.mtgOld : [];
   monthlyTotals= c.monthly || {};
   ledgerMonths = c.ledgerMonths || [];
   notices      = c.notices || [];
@@ -623,6 +625,7 @@ function syncStockFromSheet(){
       rebuildStockGroups(data.stock);
       persistStock();
       ledgerRows = Array.isArray(data.ledger) ? data.ledger : [];
+      mtgOld = Array.isArray(data.mtgOld) ? data.mtgOld : [];
       monthlyTotals = data.monthly || {};
       ledgerMonths = data.ledgerMonths || [];
       setCashFromServer(data.cash);
@@ -1574,6 +1577,7 @@ function durCN(m){ const y=Math.floor(m/12), r=m%12; return (y?y+'年':'')+(r?r+
 function renderPropPage(){
   const P=PROPERTY;
   const body=document.getElementById('prop-body');
+  if(propDrill==='history'){ renderPayHistory(body); return; }
   if(!(P.loan>0) && !(P.value>0)){
     body.innerHTML='<div class="placeholder" style="margin-bottom:14px">还没有房产数据。点下面「编辑贷款参数」填一次即可。</div>'+
       propActions()+'<div id="propEditWrap"></div>';
@@ -1637,11 +1641,85 @@ function renderPropPage(){
           '<div style="height:100%;width:'+progress.toFixed(1)+'%;background:var(--prop)"></div></div>'+
         '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--ink-2)">'+
           '<span>已还本金 $'+fmt(paid)+'</span><span>原贷 $'+fmt(P.origLoan)+'</span></div></div>'+
-      row('当前余额','未偿本金','$'+fmt(bal)))+
+      row('当前余额','未偿本金','$'+fmt(bal))+
+      payHistEntry())+
 
     grp('还清预估','按当前月供 + 额外还本', effect)+
     propActions()+
     '<div id="propEditWrap"></div>';
+}
+// ---- 还款记录 ----
+// 数据来自记账流水：月供的利息行 + 还本行（同一期按 key 里的年月配对），以及一次性 / 定期还本。
+// 剩余本金从当前余额往回倒推：某一笔之后的剩余 = 当前余额 + 之后各笔还掉的本金。
+let propDrill=null;          // null=房产主页；'history'=还款记录
+function openPayHistory(){ propDrill='history'; renderPropPage(); window.scrollTo(0,0); }
+function closePayHistory(){ propDrill=null; renderPropPage(); window.scrollTo(0,0); }
+function isMtgRow(r){ return r.category==='Transfer · 房贷' || String(r.key||'').indexOf('mtg:')===0; }
+function payHistory(){
+  const seen={}, rows=[];
+  mtgOld.concat(ledgerRows).forEach(function(r){
+    if(!isMtgRow(r) || seen[r.row]) return;
+    seen[r.row]=1; rows.push(r);
+  });
+  const periods={}, list=[];
+  rows.forEach(function(r){
+    const amt=parseFloat(r.amount)||0;
+    const m=/^mtg:(\d{4}-\d{2}):(int|prin)$/.exec(r.key||'');
+    if(m){
+      let p=periods[m[1]];
+      if(!p){ p=periods[m[1]]={date:r.date, kind:'月供', interest:0, principal:0}; list.push(p); }
+      if(m[2]==='int') p.interest+=amt; else p.principal+=amt;
+      if(r.date>p.date) p.date=r.date;
+    }else{
+      list.push({date:r.date, kind:String(r.key||'').indexOf('xfer:')===0?'定期还本':'一次性还本',
+                 interest:0, principal:amt});
+    }
+  });
+  list.sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:(a.kind==='月供'?1:-1); });
+  let bal=amortizeNow();
+  list.forEach(function(p){ p.pay=p.interest+p.principal; p.balAfter=bal; bal+=p.principal; });
+  return list;
+}
+function payHistEntry(){
+  const n=payHistory().length;
+  return '<div class="row" style="border-color:var(--prop-ln);cursor:pointer" onclick="openPayHistory()">'+
+    '<div class="tk" style="width:auto;flex:1"><div class="sym" style="font-size:13px">还款记录</div>'+
+    '<div class="qty">'+(n?('共 '+n+' 笔'):'还没有记录')+'</div></div>'+
+    '<div class="val"><div class="mv" style="color:var(--prop)">查看 &rsaquo;</div></div></div>';
+}
+function renderPayHistory(body){
+  const list=payHistory();
+  const total=list.reduce(function(s,p){ return s+p.pay; },0);
+  let html=
+    '<div style="display:flex;align-items:center;gap:10px;margin:2px 2px 12px">'+
+      '<button style="background:none;border:none;font-size:15px;font-weight:600;color:var(--prop);font-family:inherit;cursor:pointer;padding:4px 6px 4px 0" onclick="closePayHistory()">&lsaquo; 房产</button>'+
+      '<div style="flex:1;font-size:14px;font-weight:600">还款记录</div>'+
+      '<div class="num" style="font-size:15px;font-weight:600">$'+fmt(Math.round(total))+'</div>'+
+    '</div>';
+  if(!list.length){
+    html+='<div class="placeholder">'+(+PROPERTY.autoPay===1
+      ? '还没有还款记录。到了扣款日打开一次，这一期就会出现在这里'
+      : '还没有还款记录。自动记账未开启时月供不会记录，一次性还本仍会出现在这里')+'</div>';
+  }else{
+    const cell='font-size:11px;color:var(--ink-faint)';
+    html+='<div class="group" style="background:var(--prop-bg);border-color:var(--prop-ln)">'+
+      '<div class="row" style="border-color:var(--prop-ln);padding-top:8px;padding-bottom:8px">'+
+        '<div class="tk" style="width:88px"><div style="'+cell+'">日期</div></div>'+
+        '<div class="desc" style="'+cell+'">本金剩余</div>'+
+        '<div class="val"><div style="'+cell+'">还款额</div></div></div>'+
+      list.map(function(p){
+        const sub=p.kind==='月供'
+          ? '利息 $'+fmt(Math.round(p.interest))+' · 还本 $'+fmt(Math.round(p.principal))
+          : '';
+        return '<div class="row hist-row" style="border-color:var(--prop-ln)">'+
+          '<div class="tk" style="width:88px"><div class="sym" style="font-size:13px">'+(p.date||'').replace(/-/g,'/')+'</div>'+
+            '<div class="qty">'+p.kind+'</div></div>'+
+          '<div class="desc">$'+fmt(Math.round(p.balAfter))+'</div>'+
+          '<div class="val"><div class="mv">$'+fmt(Math.round(p.pay))+'</div>'+
+            (sub?'<div class="pc">'+sub+'</div>':'')+'</div></div>';
+      }).join('')+'</div>';
+  }
+  body.innerHTML=html;
 }
 function propActions(){
   return '<div style="display:flex;gap:8px;margin-top:4px">'+
@@ -1885,6 +1963,7 @@ function refreshFromSheet(){
         rebuildHsa(data.hsa);
         setCashFromServer(data.cash);
         ledgerRows = Array.isArray(data.ledger) ? data.ledger : ledgerRows;
+        mtgOld = Array.isArray(data.mtgOld) ? data.mtgOld : mtgOld;
         monthlyTotals = data.monthly || monthlyTotals;
         notices = data.notices || [];
         cacheTs = 0;
@@ -3452,6 +3531,9 @@ function goBackOne(){
   if(cur.id==='scr-detail' && currentDetailKey==='cash' && expenseDrill){
     closeExpenseDrill(); return;             // 支出明细页先退回支出列表
   }
+  if(cur.id==='scr-property' && propDrill){
+    closePayHistory(); return;               // 还款记录先退回房产页
+  }
   go('overview');
 }
 
@@ -3459,6 +3541,7 @@ function go(id){
   document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
   document.getElementById('scr-'+id).classList.add('active');
   if(id==='overview') currentDetailKey=null;
+  if(id==='property' && propDrill){ propDrill=null; renderPropPage(); }   // 从总览进来总是先看房产主页
   window.scrollTo(0,0);
 }
 

@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V8.0  (2026-10-17)
+ * 资产驾驶舱 · Google Apps Script 后端  V8.1  (2026-10-17)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,13 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V8.1 2026-10-17  房产页加「还款记录」
+ *   · readAll 新增 mtgOld：ledger 明细窗口（当月+上月+近 70 天）之外的房贷流水
+ *     （key 以 mtg: 开头的利息/还本行，以及所有 Transfer · 房贷）。
+ *     与 ledger 互不重叠，前端两者合并即得完整还款历史。
+ *     不多读任何表：Ledger 本来就整表读一遍
+ *   · 前端兼容：后端没重新部署时 mtgOld 缺省，记录只显示近 70 天的
  *
  * V8.0 2026-10-17  房产模块重做：每期还款由房产模块驱动
  *   · Property 表新增三行：payDay（每月扣款日）、autoPay（1=每期自动记账）、
@@ -1690,6 +1697,11 @@ function readAll() {
   finally { try { lock.releaseLock(); } catch (e) {} }
 }
 
+// 房贷还款流水：月供的利息行 / 还本行（key 以 mtg: 开头），以及所有「Transfer · 房贷」
+function isMtgRow(cat, key) {
+  return cat === "Transfer · 房贷" || String(key || "").indexOf("mtg:") === 0;
+}
+
 function readAllInner(force) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   // 这两张表在读路径里也要确保存在 —— 否则只打开小程序（纯读）永远不会
@@ -1723,6 +1735,7 @@ function readAllInner(force) {
   var cutD = new Date(); cutD.setDate(cutD.getDate() - 70);
   var cutoff = d2s(cutD);
   var monthCats = {};    // { "2026-08": {Dining: 403.96, ...} }
+  var mtgOld = [];
   var lg = ss.getSheetByName("Ledger");
   if (lg) {
     var lv = lg.getDataRange().getValues();
@@ -1766,9 +1779,12 @@ function readAllInner(force) {
         if (rowYm === ym) expense[cat] = (expense[cat] || 0) + amt;
       }
       allRows.push({ ds: ds, ym: rowYm, signed: catSign(cat) * amt });
+      var rowObj = { row: j + 1, date: ds, category: cat, amount: amt,
+                     note: (lv[j][3] || "").toString(), key: (lv[j][4] || "").toString() };
       if (rowYm === ym || rowYm === prevYm || ds >= cutoff) {
-        ledger.push({ row: j + 1, date: ds, category: cat, amount: amt,
-                      note: (lv[j][3] || "").toString(), key: (lv[j][4] || "").toString() });
+        ledger.push(rowObj);
+      } else if (isMtgRow(cat, rowObj.key)) {
+        mtgOld.push(rowObj);        // 窗口之外的房贷流水：只给「还款记录」用，和 ledger 不重叠
       }
     }
   }
@@ -1805,7 +1821,7 @@ function readAllInner(force) {
                       hsaIn: r2(monthly[k].hsaIn), hsaOut: r2(monthly[k].hsaOut),
                       endCash: (monthEnd[k] == null ? null : r2(monthEnd[k])) };
   });
-  return { status: "success", stock: stock, expense: expense, ledger: ledger,
+  return { status: "success", stock: stock, expense: expense, ledger: ledger, mtgOld: mtgOld,
            monthly: monthlyOut, cash: cash, ledgerMonths: ledgerMonths,
            savings: safeRun(function () { return runSavings(ss); }, []),
            notices: safeRun(function () { return readNotices(ss); }, []),
