@@ -1856,9 +1856,9 @@ console.log('\n— 房产：每期还款 —');
   ok('多还本 → 利息更少', withX.totalInterest<noX.totalInterest);
   w.go('property'); w.renderPropPage();
   const pt=w.document.getElementById('prop-body').textContent;
-  ok('页面显示「额外还本的效果」与少付利息', /额外还本的效果/.test(pt) && /少付利息/.test(pt));
-  ok('页面显示下一期的利息/还本构成', /下一期/.test(pt) && /算支出/.test(pt) && /不算支出/.test(pt));
-  ok('未开启自动记账时标明', /未开启/.test(pt));
+  ok('额外还本一行显示提前多久和少付利息', /提前 /.test(pt) && /少付利息/.test(pt));
+  ok('月供一行显示下期的利息/还本构成', /下期利息 \$/.test(pt) && /还本 \$/.test(pt));
+  ok('未开启自动记账时标明', /未开自动记账/.test(pt));
 
   // ④ 自动记账：开启后补记 autoFrom 之后的期数，利息算支出、还本算转账
   const from=iso(monthsAgo(1,1));
@@ -1887,9 +1887,9 @@ console.log('\n— 房产：每期还款 —');
              {id:'fn',name:'网费',amount:70,category:'Bill & utilities',freq:'monthly',
               start:iso(monthsAgo(6,5)),enabled:true}];
   let c=app(P0,[],FIX); await wait(500);
-  c.w.go('property'); c.w.renderPropPage(); c.w.showPropForm();
+  c.w.go('property'); c.w.openPropEdit('pay');
   c.w.setPropAuto(1);
-  c.w.savePropForm(); await wait(500);
+  c.w.savePropEdit('pay'); await wait(500);
   const after=JSON.parse(c.w.localStorage.getItem('fixedExpenses_v1'));
   ok('开启自动记账后，固定支出里的房贷被停用', after.find(x=>x.id==='fm').enabled===false);
   ok('其他固定支出不受影响', after.find(x=>x.id==='fn').enabled!==false);
@@ -1898,16 +1898,16 @@ console.log('\n— 房产：每期还款 —');
 
   // ⑦ 只改额外还本时不重设起算点（原来每次保存都把锚点挪到今天）
   let d=app(P0); await wait(500);
-  d.w.go('property'); d.w.renderPropPage(); d.w.showPropForm();
+  d.w.go('property'); d.w.openPropEdit('extra');
   d.w.document.getElementById('p-extra').value='800';
-  d.w.savePropForm(); await wait(300);
+  d.w.savePropEdit('extra'); await wait(300);
   ok('余额没改就不重设锚点', d.w.eval("PROPERTY.updated")===P0.updated && d.w.eval("PROPERTY.loan")===300000);
   ok('额外还本改成 800', d.w.eval("PROPERTY.extra")===800);
 
   // ⑧ 一次性还本：走转账，Chase 扣钱、记 Transfer · 房贷、余额从当前余额扣
   let e=app(P0); await wait(500);
   const bal0=e.w.eval("amortizeNow()"), cash0=e.w.eval("cashInfo.balance");
-  e.w.go('property'); e.w.renderPropPage(); e.w.showLumpForm();
+  e.w.go('property'); e.w.openPropEdit('lump');
   e.w.document.getElementById('p-lump').value='10000';
   e.w.saveLump(); await wait(300);
   ok('一次性还本后余额 = 当前余额 − 10000', e.w.eval("amortizeNow()")===bal0-10000,
@@ -2004,11 +2004,11 @@ console.log('\n— 房产：还款记录 —');
   ok('每行有 日期 / 本金剩余 / 还款额',
      r0.includes(iso(d1).replace(/-/g,'/')) && r0.includes('$'+w.fmt(cur)) && r0.includes('$2,500'), r0);
   ok('表头是 日期 / 本金剩余 / 还款额', /日期\s*本金剩余\s*还款额/.test(body()));
-  ok('明细页不显示房产主页内容', !/还清预估/.test(body()));
+  ok('明细页不显示房产主页内容', !/预计还清/.test(body()));
   w.goBackOne();
-  ok('右滑返回先回到房产主页', /还清预估/.test(body()) && w.document.querySelector('.screen.active').id==='scr-property');
+  ok('右滑返回先回到房产主页', /预计还清/.test(body()) && w.document.querySelector('.screen.active').id==='scr-property');
   w.openPayHistory(); w.go('overview'); w.go('property');
-  ok('从总览重新进来先看房产主页', /还清预估/.test(body()));
+  ok('从总览重新进来先看房产主页', /预计还清/.test(body()));
 
   // 缓存：mtgOld 跟其他数据一起进首屏缓存
   const cache=JSON.parse(w.localStorage.getItem('sheetCache_v1')||'{}');
@@ -2298,4 +2298,98 @@ console.log('\n— 固定支出里的房贷 —');
   w.saveFixed_('Bill & utilities'); await wait(800);
   ok('新加的房贷条目不按 $1234 记账', !led(calls).some(x=>+x.amount===1234 || x.key.indexOf('fix:')===0));
   ok('新加后本期按房产记账', thisMonth(calls).length===2);
+}
+
+// ══════════════ 三十、房产页：点哪行改哪行 + house loan 绑定 ══════════════
+console.log('\n— 房产页：点哪行改哪行 —');
+{
+  const pad2=(n)=>String(n).padStart(2,'0');
+  const iso=(d)=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const T=new Date(); T.setHours(0,0,0,0);
+  const mAgo=(n,day)=>new Date(T.getFullYear(), T.getMonth()-n, day);
+  const day=Math.min(T.getDate(),28), ym=iso(T).slice(0,7), due=iso(mAgo(0,day));
+  const P0={value:500000,loan:300000,origLoan:350000,rate:6,termYears:30,payment:2200,extra:300,
+            updated:iso(mAgo(1,day)),payDay:day,autoPay:0,autoFrom:''};
+  function app(prop, fixed, ledger){
+    const calls=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        w.localStorage.setItem('fixedExpenses_v1',JSON.stringify(fixed||[]));
+        w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+          if(a){ calls.push(Object.fromEntries(url.searchParams));
+                 return Promise.resolve({json:async()=>({status:'success',row:90+calls.length})}); }
+          return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},
+            ledger:ledger||[],monthly:{},ledgerMonths:[],
+            cash:{balance:20000,anchorDate:iso(mAgo(6,1)),anchorAmount:20000,hasAnchor:true,
+                  bookStart:iso(mAgo(6,1))},
+            savings:[],bond:[],notices:[],hsa:null,retire:[],config:{},property:prop,car:null,rsu:null,
+            stockHistory:[],serverDate:iso(T)})}); };
+        w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, calls};
+  }
+  const body=w=>w.document.getElementById('prop-body');
+  const val=(w,id,v)=>{ w.document.getElementById(id).value=v; };
+
+  // ① 页面：没有底部统一编辑，也没有单独的下一期 / 自动记账行
+  let {w,calls}=app(P0); await wait(600);
+  w.go('property');
+  const t=body(w).textContent;
+  ok('没有统一的编辑按钮', !/编辑贷款参数/.test(t));
+  ok('「下一期」不单独占一行，并进月供', ![...body(w).querySelectorAll('.sym')].some(e=>/下一期/.test(e.textContent)) && /下期利息/.test(t));
+  ok('「自动记账」不单独占一行', ![...body(w).querySelectorAll('.sym')].some(e=>/自动记账/.test(e.textContent)));
+  ok('五个可编辑的值都显示', ['房产估值','贷款余额','月供','额外还本','年利率'].every(x=>t.includes(x)));
+  ok('默认没有打开的表单', !body(w).querySelector('.editform'));
+
+  // ② 点哪行开哪行，同一时间只开一个，再点收起
+  w.openPropEdit('value');
+  ok('点估值：只出现估值输入框', !!w.document.getElementById('p-value') && !w.document.getElementById('p-pay'));
+  w.openPropEdit('pay');
+  ok('点月供：换成月供表单', !!w.document.getElementById('p-pay') && !w.document.getElementById('p-value'));
+  ok('全页只有一个表单', body(w).querySelectorAll('.editform').length===1);
+  w.openPropEdit('pay');
+  ok('再点一次收起', !body(w).querySelector('.editform'));
+
+  // ③ 每行各存各的
+  w.openPropEdit('value'); val(w,'p-value','650000'); w.savePropEdit('value'); await wait(300);
+  ok('改估值：净值跟着变', w.eval("PROPERTY.value")===650000 && body(w).textContent.includes('$650,000'));
+  ok('保存后写回', calls.some(c=>c.action==='saveProperty'&&c.value==='650000'));
+  ok('保存后表单收起', !body(w).querySelector('.editform'));
+  w.openPropEdit('rate'); val(w,'p-rate','5.5'); w.savePropEdit('rate'); await wait(300);
+  ok('改利率', w.eval("PROPERTY.rate")===5.5);
+  const before=w.eval("PROPERTY.loan");
+  w.openPropEdit('loan'); val(w,'p-loan',String(w.eval("amortizeNow()"))); w.savePropEdit('loan'); await wait(300);
+  ok('余额没改不重设起算点', w.eval("PROPERTY.loan")===before);
+  w.openPropEdit('loan'); val(w,'p-loan','250000'); w.savePropEdit('loan'); await wait(300);
+  ok('余额改了才重设', w.eval("amortizeNow()")===250000);
+  w.openPropEdit('pay'); w.setPropAuto(0); val(w,'p-pay','2400'); val(w,'p-day','3'); w.savePropEdit('pay'); await wait(300);
+  ok('改月供和扣款日', w.eval("PROPERTY.payment")===2400 && w.eval("PROPERTY.payDay")===3);
+  w.openPropEdit('value'); w.closePropEdit();
+  ok('取消不改数据也收起', w.eval("PROPERTY.value")===650000 && !body(w).querySelector('.editform'));
+
+  // ④ 没有房产数据时也能直接点着填
+  ({w}=app(null)); await wait(500);
+  w.go('property');
+  ok('空数据显示未填，仍可点开', /未填/.test(body(w).textContent));
+  w.openPropEdit('value');
+  ok('空数据点开有输入框', !!w.document.getElementById('p-value'));
+
+  // ⑤ 这次的 bug：条目叫 house hoan，删掉后被固定支出写回来
+  const HH={id:'hh',name:'house hoan',amount:2625.84,category:'Bill & utilities',freq:'monthly',
+            start:iso(mAgo(6,day)),enabled:true};
+  let r=app(P0,[HH]); await wait(800);
+  const fixRec=x=>x.action==='autoLedger'&&x.key.indexOf('fix:hh:')===0;
+  ok('house hoan 不再按 2625.84 记账（删掉后不会写回）', !r.calls.some(fixRec));
+  ok('本期按房产记账', r.calls.filter(x=>x.action==='autoLedger'&&x.key.indexOf('mtg:'+ym)===0).length===2);
+  const saved=JSON.parse(r.w.localStorage.getItem('fixedExpenses_v1'));
+  ok('绑定后记住（linkProp）', saved[0].linkProp===true && saved[0].enabled===false);
+  ok('House Loan 大小写都认', r.w.eval("isMortgageFixed({name:'House Loan'})"));
+  ok('House cleaning 不会被误认', !r.w.eval("isMortgageFixed({name:'House cleaning'})"));
+  saved[0].name='Rocket';
+  let r2=app(Object.assign({},P0,{autoPay:1,autoFrom:iso(mAgo(0,1))}),saved); await wait(700);
+  ok('绑定后改名也不断', r2.w.eval("isMortgageFixed(loadFixed()[0])") && !r2.calls.some(x=>x.action==='autoLedger'&&x.key.indexOf('fix:hh:')===0));
+  // 还没删的旧记录：备注带 house hoan 也要认出来，不重复扣
+  const oldRow={row:7,date:due,category:'Bill & utilities',amount:2625.84,note:'house hoan（固定）',key:'fix:hh:'+due};
+  let r3=app(P0,[HH],[oldRow]); await wait(700);
+  ok('旧记录还在时不重复扣', r3.calls.filter(x=>x.action==='autoLedger'&&x.key.indexOf('mtg:'+ym)===0).length===0);
 }
