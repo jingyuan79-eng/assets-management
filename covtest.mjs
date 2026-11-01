@@ -2192,3 +2192,110 @@ console.log('\n— 车贷 —');
   J(g.doGet({parameter:{action:'saveCar', payment:'0'}}));
   ok('月供可以改回留空（按公式算）', !J(g.doGet({parameter:{}})).car.payment);
 }
+
+// ══════════════ 二十九、固定支出里的房贷跟随房产设置 ══════════════
+// 房贷只有一个来源。固定支出里的房贷条目不按自己存的旧金额记账，每次记账前都检查，
+// 不依赖「在房产表单里把开关从关打开」那一刻。
+console.log('\n— 固定支出里的房贷 —');
+{
+  const pad2=(n)=>String(n).padStart(2,'0');
+  const iso=(d)=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const T=new Date(); T.setHours(0,0,0,0);
+  const mAgo=(n,day)=>new Date(T.getFullYear(), T.getMonth()-n, day);
+  const day=Math.min(T.getDate(),28), ym=iso(T).slice(0,7), due=iso(mAgo(0,day));
+  const P0={value:500000,loan:300000,origLoan:350000,rate:6,termYears:30,payment:2600,extra:400,
+            updated:iso(mAgo(1,day+1>28?28:day)),payDay:day,autoPay:0,autoFrom:''};
+  const OLD={id:'fm',name:'房贷月供',amount:2000,category:'Bill & utilities',freq:'monthly',
+             start:iso(mAgo(6,day)),enabled:true};
+  const NET={id:'fn',name:'网费',amount:70,category:'Bill & utilities',freq:'monthly',
+             start:iso(mAgo(6,day)),enabled:true};
+  function app(prop, fixed, ledger){
+    const calls=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',
+      beforeParse(w){ w.localStorage.clear();
+        w.localStorage.setItem('fixedExpenses_v1',JSON.stringify(fixed));
+        w.fetch=(u)=>{ const url=new URL(u), a=url.searchParams.get('action');
+          if(a){ calls.push(Object.fromEntries(url.searchParams));
+                 return Promise.resolve({json:async()=>({status:'success',row:90+calls.length})}); }
+          return Promise.resolve({json:async()=>({status:'success',stock:[],expense:{},
+            ledger:ledger||[],monthly:{},ledgerMonths:[],
+            cash:{balance:20000,anchorDate:iso(mAgo(6,1)),anchorAmount:20000,hasAnchor:true,
+                  bookStart:iso(mAgo(6,1))},
+            savings:[],bond:[],notices:[],hsa:null,retire:[],config:{},property:prop,car:null,rsu:null,
+            stockHistory:[],serverDate:iso(T)})}); };
+        w.alert=()=>{}; w.confirm=()=>{ w.__confirmed=true; return true; }; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, calls};
+  }
+  const led=c=>c.filter(x=>x.action==='autoLedger');
+  const fixedOf=w=>JSON.parse(w.localStorage.getItem('fixedExpenses_v1'));
+  const thisMonth=c=>led(c).filter(x=>x.key.indexOf('mtg:'+ym)===0);
+
+  // ① 正是这次的问题：开关没开过，固定支出里存着旧金额 2000，房产月供 2600 + 400
+  let {w,calls}=app(P0,[OLD,NET]); await wait(900);
+  ok('旧金额 $2000 的房贷条目不再记账', !led(calls).some(x=>x.key.indexOf('fix:fm:')===0));
+  const m=thisMonth(calls);
+  const sum=m.reduce((a,x)=>a+ +x.amount,0);
+  ok('本期按房产设置记账：利息 + 还本 = 2600 + 400', m.length===2 && Math.abs(sum-3000)<0.02, String(sum));
+  ok('利息进 Bill & utilities，还本进 Transfer · 房贷',
+     m.some(x=>x.category==='Bill & utilities'&&x.note==='房贷利息') &&
+     m.some(x=>x.category==='Transfer · 房贷'&&x.note==='房贷还本'));
+  ok('现金按房产金额扣，不是旧金额', w.eval("cashInfo.balance")<=20000-3000+0.02 && w.eval("cashInfo.balance")>=20000-3000-70*3,
+     String(w.eval("cashInfo.balance")));
+  ok('房贷条目被停用', fixedOf(w).find(x=>x.id==='fm').enabled===false);
+  ok('其他固定支出照常记账', led(calls).some(x=>x.key.indexOf('fix:fn:')===0 && +x.amount===70));
+  ok('自动记账状态写回 Sheet', calls.some(x=>x.action==='saveProperty'&&x.autoPay==='1'));
+  ok('停用状态写回 Sheet', calls.some(x=>x.action==='saveConfig'&&x.key==='fixedExpenses_v1'&&/"enabled":false/.test(x.value)));
+  ok('全程不弹确认框', !w.__confirmed);
+
+  // ② 固定支出页显示跟随房产的金额，不显示旧金额
+  const sec=w.eval("renderFixedSection('Bill & utilities')");
+  ok('列表显示「跟随房产」和 $3,000', /跟随房产/.test(sec) && sec.includes('$3,000') && !sec.includes('$2,000'));
+  ok('折合每月按房产金额算（3000 + 网费 70）', sec.includes('折合每月 $3,070'));
+  ok('点这一行进房产页', /onclick="go\('property'\)"/.test(sec));
+
+  // ③ 改房产月供，下一次记账立刻跟着变
+  ({w,calls}=app(Object.assign({},P0,{payment:2800,extra:0}),[OLD])); await wait(800);
+  const s2=thisMonth(calls).reduce((a,x)=>a+ +x.amount,0);
+  ok('房产月供改成 2800，记账跟着变', Math.abs(s2-2800)<0.02, String(s2));
+
+  // ④ 本月已被旧条目记过：不重复扣；删掉旧记录后按房产补记
+  const oldRow={row:7,date:due,category:'Bill & utilities',amount:2000,note:'房贷月供（固定）',key:'fix:fm:'+due};
+  ({w,calls}=app(P0,[OLD],[oldRow])); await wait(800);
+  ok('本月已被旧条目记过：不再记第二遍', thisMonth(calls).length===0, JSON.stringify(thisMonth(calls)));
+  ok('旧记录原样保留，不被自动改动', !calls.some(x=>/deleteLedger|updateLedger/.test(x.action)));
+  const after=fixedOf(w);
+  ({w,calls}=app(Object.assign({},P0,{autoPay:1,autoFrom:iso(mAgo(0,1))}),after)); await wait(800);
+  ok('删掉旧记录后，同步时按房产补记本期', thisMonth(calls).length===2);
+
+  // ⑤ 条目被删了、只剩旧流水：靠备注也能认出来
+  ({w,calls}=app(Object.assign({},P0,{autoPay:1,autoFrom:iso(mAgo(0,1))}),[],[oldRow])); await wait(700);
+  ok('固定支出条目已删时，也不会重复扣本月', thisMonth(calls).length===0);
+
+  // ⑥ 开关已开但条目没停（名称当时没认出来、确认框点了取消）：也会停掉
+  ({w,calls}=app(Object.assign({},P0,{autoPay:1,autoFrom:iso(mAgo(0,1))}),[OLD])); await wait(800);
+  ok('开关已开时旧条目也不记账', !led(calls).some(x=>x.key.indexOf('fix:fm:')===0));
+  ok('本期只记利息和还本两笔', thisMonth(calls).length===2);
+
+  // ⑦ 旧版勾过「跟随房贷」的条目，名称不含房贷也算
+  ({w,calls}=app(P0,[Object.assign({},OLD,{id:'fl',name:'Chase 月供',linkProp:true})])); await wait(800);
+  ok('勾过跟随房贷的条目也绑定', !led(calls).some(x=>x.key.indexOf('fix:fl:')===0) && thisMonth(calls).length===2);
+  ok('英文名 Mortgage 能认出', w.eval("isMortgageFixed({name:'Mortgage'})"));
+  ok('普通条目不会被误认', !w.eval("isMortgageFixed({name:'车保险'})"));
+
+  // ⑧ 房产还没填：旧条目继续记，不能两边都不记
+  ({w,calls}=app(null,[OLD])); await wait(800);
+  ok('房产没填时旧条目继续按自己的金额记', led(calls).some(x=>x.key.indexOf('fix:fm:')===0 && +x.amount===2000));
+  ok('房产没填时条目不被停用', fixedOf(w).find(x=>x.id==='fm').enabled!==false);
+
+  // ⑨ 新加一条叫房贷的固定支出：也归房产
+  ({w,calls}=app(P0,[])); await wait(600);
+  w.eval("openDetail('cash')");
+  const fw=w.document.createElement('div'); fw.id='fixedFormWrap'; w.document.body.appendChild(fw);
+  w.showFixedForm('Bill & utilities');
+  const fv=(id,v)=>{ w.document.getElementById(id).value=v; };
+  fv('fx-name','房贷'); fv('fx-amt','1234'); fv('fx-start',iso(mAgo(1,day)));
+  w.saveFixed_('Bill & utilities'); await wait(800);
+  ok('新加的房贷条目不按 $1234 记账', !led(calls).some(x=>+x.amount===1234 || x.key.indexOf('fix:')===0));
+  ok('新加后本期按房产记账', thisMonth(calls).length===2);
+}
