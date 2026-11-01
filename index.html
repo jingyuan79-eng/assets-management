@@ -298,7 +298,7 @@ const PROPERTY = {
   value:0, loan:0, origLoan:0, rate:0,
   termYears:30, payment:0, extra:0, updated:"",
   payDay:1,        // 每月几号扣款
-  autoPay:0,       // 1 = 每期由房产模块自动记账（利息算支出、还本算转账）
+  autoPay:0,       // 1 = 每期由房产模块自动记账（月供 + 额外还本，全额算支出）
   autoFrom:""      // 从哪天起自动记；之前的期数不补，避免和旧的固定支出重复
 };
 try{ const sp=JSON.parse(localStorage.getItem('property_v1')||'null'); if(sp) Object.assign(PROPERTY,sp); }catch(e){}
@@ -480,7 +480,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V9.2';
+const APP_VER='V9.3';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -827,8 +827,12 @@ function runFixedExpenses(){
 }
 // 房贷只有一个来源：房产设置。固定支出里的房贷条目不按自己存的金额记账，
 // 每次记账前都检查（不是只在打开开关那一刻），新加的、别的设备同步来的都跑不掉。
-const MTG_FIXED_RE=/房贷|mortgage|(home|house)\s*[lh]oan/i;
-function isMortgageFixed(x){ return !!(x && (x.linkProp || MTG_FIXED_RE.test(x.name||''))); }
+const MTG_FIXED_RE=/房贷|mortgage|(home|house)[\s\-_]*[lh]oan/i;
+// linkProp：true = 在房产里明确选了这条；false = 明确说不是，名字再像也不算
+function isMortgageFixed(x){
+  if(!x || x.linkProp===false) return false;
+  return !!x.linkProp || MTG_FIXED_RE.test(x.name||'');
+}
 function mtgReady(){ return PROPERTY.payment>0 && PROPERTY.loan>0 && !!PROPERTY.updated; }
 function mtgMonthly(){ return (+PROPERTY.payment||0)+(+PROPERTY.extra||0); }
 // 把启用中的房贷条目交给房产模块：停用条目，并打开房产的自动记账。
@@ -846,13 +850,23 @@ function bindMortgageFixed(){
     persistProp();
   }
 }
-// 这个月是否已被旧的固定支出记过。记过就不再记利息和还本，否则同一期扣两次；
-// 把那条旧记录删掉，下次同步就会按房产设置补上。
-function mtgPaidByFixed(ym){
+// 房产月供那一行选的「对应的固定支出」。改选后，原来那条恢复成普通固定支出。
+function setMortgageLink(id){
+  const list=loadFixed();
+  let changed=false;
+  list.forEach(function(x){
+    if(x.id===id){ if(x.linkProp!==true){ x.linkProp=true; changed=true; } }
+    else if(isMortgageFixed(x)){ x.linkProp=false; x.enabled=true; changed=true; }
+  });
+  if(changed) saveFixed(list);
+}
+// 这个月里应该被房产这一笔取代的旧记录：旧版拆开的利息/还本，以及固定支出写的那条
+function mtgStaleRows(ym){
   const ids={};
   loadFixed().forEach(function(x){ if(isMortgageFixed(x)) ids[x.id]=1; });
-  return ledgerRows.some(function(r){
+  return ledgerRows.filter(function(r){
     const k=String(r.key||'');
+    if(k==='mtg:'+ym+':int' || k==='mtg:'+ym+':prin') return true;
     if(k.indexOf('fix:')!==0 || (r.date||'').slice(0,7)!==ym) return false;
     return !!ids[k.split(':')[1]] || MTG_FIXED_RE.test(r.note||'');
   });
@@ -1693,7 +1707,7 @@ function renderPropPage(){
   // 月供一行带上下一期的构成和记账状态，不再各占一行
   const r=(P.rate||0)/100/12, monthly=(P.payment||0)+(P.extra||0);
   const nInt=bal*r, nPrin=Math.max(0,Math.min(bal,monthly-nInt));
-  const paySub=(P.payment>0 ? '每月 '+(P.payDay||1)+' 号'+(+P.autoPay===1?'自动记账':' · 未开自动记账') : '')+
+  const paySub=(P.payment>0 ? '每月 '+(P.payDay||1)+' 号'+(+P.autoPay===1?'自动记账 $'+fmt(monthly):' · 未开自动记账') : '')+
     (P.payment>0 && bal>0 ? '<br>下期利息 $'+fmt(Math.round(nInt))+' + 还本 $'+fmt(Math.round(nPrin)) : '');
 
   const ready=bal>0 && P.payment>0;
@@ -1729,6 +1743,16 @@ function renderPropPage(){
       item('lump','一次性还本','付款账户扣钱，余额立刻减少',''));
   if(propEdit==='pay') setPropAuto(propAutoDraft);
 }
+function mtgLinkField(){
+  const list=loadFixed();
+  if(!list.length) return '';
+  const cur=list.find(isMortgageFixed);
+  return '<div class="fld"><label>固定支出里哪条是房贷（选中后由这里记账）</label><select id="p-link">'+
+    '<option value="">没有</option>'+
+    list.map(function(x){
+      return '<option value="'+x.id+'"'+(cur&&cur.id===x.id?' selected':'')+'>'+x.name+' · $'+fmt(x.amount)+'</option>';
+    }).join('')+'</select></div>';
+}
 function propEditForm(k){
   const P=PROPERTY;
   const fld=(id,label,val,ph,type)=>'<div class="fld"><label>'+label+'</label>'+
@@ -1745,12 +1769,13 @@ function propEditForm(k){
   if(k==='pay'){
     const tm=new Date(todayD()); tm.setDate(tm.getDate()+1);
     inner=half(fld('p-pay','标准月供 ($)',P.payment||''), fld('p-day','每月扣款日',P.payDay||1,'1–31'))+
-      '<div class="fld"><label>自动记账（利息算支出，还本不算）</label>'+
+      '<div class="fld"><label>自动记账（月供 + 额外还本，全额算支出）</label>'+
         '<div class="cashtabs" style="margin:2px 0 0">'+
           '<div id="pa-on" class="cashtab" onclick="setPropAuto(1)">开启</div>'+
           '<div id="pa-off" class="cashtab" onclick="setPropAuto(0)">关闭</div></div></div>'+
       '<div class="fld" id="pa-from-fld"><label>从哪天起记（之前的期数不补）</label>'+
-        '<input id="p-from" type="date" value="'+(P.autoFrom||fmtD(tm))+'"></div>';
+        '<input id="p-from" type="date" value="'+(P.autoFrom||fmtD(tm))+'"></div>'+
+      mtgLinkField();
   }
   if(k==='extra') inner=fld('p-extra','每月额外还本 ($)',P.extra||0);
   if(k==='rate') inner=half(fld('p-rate','年利率 (%)',P.rate||''), fld('p-term','贷款年限',P.termYears||30));
@@ -1779,8 +1804,12 @@ function payHistory(){
   const periods={}, list=[];
   rows.forEach(function(r){
     const amt=parseFloat(r.amount)||0;
+    const whole=/^mtg:\d{4}-\d{2}$/.test(r.key||'');
     const m=/^mtg:(\d{4}-\d{2}):(int|prin)$/.exec(r.key||'');
-    if(m){
+    if(whole){
+      const n=/利息 ([\d.]+) · 还本 ([\d.]+)/.exec(r.note||'');
+      list.push({date:r.date, kind:'月供', interest:n?+n[1]:0, principal:n?+n[2]:amt});
+    }else if(m){
       let p=periods[m[1]];
       if(!p){ p=periods[m[1]]={date:r.date, kind:'月供', interest:0, principal:0}; list.push(p); }
       if(m[2]==='int') p.interest+=amt; else p.principal+=amt;
@@ -1863,6 +1892,8 @@ function savePropEdit(k){
     P.payment=Math.round(pay*100)/100; P.payDay=day;
     P.autoPay=propAutoDraft;
     if(propAutoDraft===1) P.autoFrom=document.getElementById('p-from').value||fmtD(todayD());
+    const link=document.getElementById('p-link');
+    if(link) setMortgageLink(link.value);
   }
   if(k==='extra'){
     const extra=num('p-extra');
@@ -3204,6 +3235,22 @@ function xferKey(r, d){
   if(!r.id){ r.id=stableId('x',[r.src,r.tgt,r.amt,r.freq,r.start]); }
   return 'xfer:'+r.id+':'+fmtD(d);
 }
+// 每到扣款日记一笔：这一期的利息 + 还本（= 月供 + 额外还本）全额算支出。
+// 拆分写在备注里，还款记录靠它倒推余额，之后改设置也不会改写历史。
+function mtgCategory(){
+  const it=loadFixed().find(isMortgageFixed);
+  return (it && it.category) || MTG_INT_CAT;
+}
+function mtgDropRow(r){
+  return apiWrite({action:'deleteLedger', row:r.row, expectAmount:r.amount}).then(function(res){
+    if(!res || res.status!=='success') return false;
+    const row=r.row;
+    ledgerRows=ledgerRows.filter(function(x){ return x!==r; });
+    ledgerRows.forEach(function(x){ if(x.row>row) x.row--; });   // Sheet 删行后，后面的行号上移
+    applyCashDelta(-signedOf(r));
+    return true;
+  });
+}
 function runMortgage(){
   if(!(+PROPERTY.autoPay) || !(PROPERTY.payment>0)) return Promise.resolve();
   const floor=bookFloor();
@@ -3212,24 +3259,31 @@ function runMortgage(){
   mtgSchedule(todayD()).forEach(function(p){
     const pd=dateOf(p.date);
     if(pd<floor || (from && pd<from)) return;
-    const ym=p.date.slice(0,7);
-    if(mtgPaidByFixed(ym)) return;
-    jobs.push({key:'mtg:'+ym+':int',  date:p.date, cat:MTG_INT_CAT,
-               amt:Math.round(p.interest*100)/100,  note:'房贷利息'});
-    jobs.push({key:'mtg:'+ym+':prin', date:p.date, cat:'Transfer · 房贷',
-               amt:Math.round(p.principal*100)/100, note:'房贷还本'});
+    const ym=p.date.slice(0,7), stale=mtgStaleRows(ym), key='mtg:'+ym;
+    if(!stale.length && ledgerHasKey(key)) return;
+    const i=Math.round(p.interest*100)/100, c=Math.round(p.principal*100)/100;
+    jobs.push({key:key, date:p.date, stale:stale, amt:Math.round((i+c)*100)/100,
+               note:'房贷月供（利息 '+i.toFixed(2)+' · 还本 '+c.toFixed(2)+'）'});
   });
-  const todo=jobs.filter(function(j){ return j.amt>0 && !ledgerHasKey(j.key); });
-  if(!todo.length) return Promise.resolve();
+  if(!jobs.length) return Promise.resolve();
+  const cat=mtgCategory();
   let chain=Promise.resolve();
-  todo.forEach(function(j){
+  jobs.forEach(function(j){
     chain=chain.then(function(){
-      return apiWrite({action:'autoLedger', key:j.key, date:j.date,
-                       category:j.cat, amount:j.amt, note:j.note}).then(function(res){
-        const nr={row:res&&res.row, date:j.date, category:j.cat, amount:j.amt, note:j.note, key:j.key};
-        ledgerRows.push(nr);
-        // 余额已经由 amortizeNow 按计划推算，这里只动流动现金，不碰房贷锚点
-        if(res && res.status==='success') applyCashDelta(signedOf(nr));
+      // 旧记录一条条删；有一条删不掉就不写新的，否则同一期会扣两次
+      let dels=Promise.resolve(true);
+      j.stale.forEach(function(r){
+        dels=dels.then(function(ok){ return ok ? mtgDropRow(r) : false; });
+      });
+      return dels.then(function(ok){
+        if(!ok || ledgerHasKey(j.key)) return;
+        return apiWrite({action:'autoLedger', key:j.key, date:j.date,
+                         category:cat, amount:j.amt, note:j.note}).then(function(res){
+          const nr={row:res&&res.row, date:j.date, category:cat, amount:j.amt, note:j.note, key:j.key};
+          ledgerRows.push(nr);
+          // 余额已经由 amortizeNow 按计划推算，这里只动流动现金，不碰房贷锚点
+          if(res && res.status==='success') applyCashDelta(signedOf(nr));
+        });
       });
     });
   });

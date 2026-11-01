@@ -1860,20 +1860,17 @@ console.log('\n— 房产：每期还款 —');
   ok('月供一行显示下期的利息/还本构成', /下期利息 \$/.test(pt) && /还本 \$/.test(pt));
   ok('未开启自动记账时标明', /未开自动记账/.test(pt));
 
-  // ④ 自动记账：开启后补记 autoFrom 之后的期数，利息算支出、还本算转账
+  // ④ 自动记账：开启后补记 autoFrom 之后的期数，每期一笔，月供 + 额外还本全额算支出
   const from=iso(monthsAgo(1,1));
   let a=app(Object.assign({},P0,{autoPay:1,autoFrom:from})); await wait(700);
   const recs=a.calls.filter(c=>c.action==='autoLedger');
-  const ints=recs.filter(c=>/:int$/.test(c.key)), prins=recs.filter(c=>/:prin$/.test(c.key));
-  ok('记了利息', ints.length>0 && ints.every(c=>c.category==='Bill & utilities' && c.note==='房贷利息'),
-     ints.map(c=>c.key).join(','));
-  ok('记了还本（Transfer · 房贷，不算支出）',
-     prins.length===ints.length && prins.every(c=>c.category==='Transfer · 房贷'));
+  ok('每期只记一笔', recs.length>0 && new Set(recs.map(c=>c.key)).size===recs.length && recs.every(c=>/^mtg:\d{4}-\d{2}$/.test(c.key)),
+     recs.map(c=>c.key).join(','));
+  ok('记进 Bill & utilities，算支出', recs.every(c=>c.category==='Bill & utilities'));
   ok('autoFrom 之前的期数不补', recs.every(c=>c.date>=from), recs.map(c=>c.date).join(','));
-  ok('每期利息 + 还本 = 月供 + 额外还本',
-     ints.every((c,i)=>Math.abs((+c.amount)+(+prins[i].amount)-2500)<0.02));
+  ok('金额 = 月供 + 额外还本', recs.every(c=>Math.abs(+c.amount-2500)<0.02), recs.map(c=>c.amount).join(','));
+  ok('备注写明利息和还本', recs.every(c=>/利息 [\d.]+ · 还本 [\d.]+/.test(c.note)), recs[0]&&recs[0].note);
   ok('自动记账不改房贷锚点', a.w.eval("PROPERTY.loan")===300000 && a.w.eval("PROPERTY.updated")===P0.updated);
-  ok('还本那笔在支出统计里不算支出', a.w.eval("catKind('Transfer · 房贷')")==='transfer');
 
   // ⑤ 已记过的不再重复记
   const done=recs.map(c=>({row:1,date:c.date,category:c.category,amount:+c.amount,note:c.note,key:c.key}));
@@ -2229,17 +2226,15 @@ console.log('\n— 固定支出里的房贷 —');
   }
   const led=c=>c.filter(x=>x.action==='autoLedger');
   const fixedOf=w=>JSON.parse(w.localStorage.getItem('fixedExpenses_v1'));
-  const thisMonth=c=>led(c).filter(x=>x.key.indexOf('mtg:'+ym)===0);
+  const thisMonth=c=>led(c).filter(x=>x.key==='mtg:'+ym);
 
   // ① 正是这次的问题：开关没开过，固定支出里存着旧金额 2000，房产月供 2600 + 400
   let {w,calls}=app(P0,[OLD,NET]); await wait(900);
   ok('旧金额 $2000 的房贷条目不再记账', !led(calls).some(x=>x.key.indexOf('fix:fm:')===0));
   const m=thisMonth(calls);
   const sum=m.reduce((a,x)=>a+ +x.amount,0);
-  ok('本期按房产设置记账：利息 + 还本 = 2600 + 400', m.length===2 && Math.abs(sum-3000)<0.02, String(sum));
-  ok('利息进 Bill & utilities，还本进 Transfer · 房贷',
-     m.some(x=>x.category==='Bill & utilities'&&x.note==='房贷利息') &&
-     m.some(x=>x.category==='Transfer · 房贷'&&x.note==='房贷还本'));
+  ok('本期按房产设置记一笔：2600 + 400', m.length===1 && Math.abs(sum-3000)<0.02, String(sum));
+  ok('全额进支出分类', m[0].category==='Bill & utilities');
   ok('现金按房产金额扣，不是旧金额', w.eval("cashInfo.balance")<=20000-3000+0.02 && w.eval("cashInfo.balance")>=20000-3000-70*3,
      String(w.eval("cashInfo.balance")));
   ok('房贷条目被停用', fixedOf(w).find(x=>x.id==='fm').enabled===false);
@@ -2259,27 +2254,26 @@ console.log('\n— 固定支出里的房贷 —');
   const s2=thisMonth(calls).reduce((a,x)=>a+ +x.amount,0);
   ok('房产月供改成 2800，记账跟着变', Math.abs(s2-2800)<0.02, String(s2));
 
-  // ④ 本月已被旧条目记过：不重复扣；删掉旧记录后按房产补记
+  // ④ 本月已被旧条目记过：旧记录被取代，不重复扣
   const oldRow={row:7,date:due,category:'Bill & utilities',amount:2000,note:'房贷月供（固定）',key:'fix:fm:'+due};
   ({w,calls}=app(P0,[OLD],[oldRow])); await wait(800);
-  ok('本月已被旧条目记过：不再记第二遍', thisMonth(calls).length===0, JSON.stringify(thisMonth(calls)));
-  ok('旧记录原样保留，不被自动改动', !calls.some(x=>/deleteLedger|updateLedger/.test(x.action)));
-  const after=fixedOf(w);
-  ({w,calls}=app(Object.assign({},P0,{autoPay:1,autoFrom:iso(mAgo(0,1))}),after)); await wait(800);
-  ok('删掉旧记录后，同步时按房产补记本期', thisMonth(calls).length===2);
+  ok('旧记录被删', calls.some(x=>x.action==='deleteLedger'&&x.row==='7'&&x.expectAmount==='2000'));
+  ok('换成房产金额的一笔', thisMonth(calls).length===1 && Math.abs(+thisMonth(calls)[0].amount-3000)<0.02);
+  ok('先删后写，不会同时存在', calls.findIndex(x=>x.action==='deleteLedger')<calls.findIndex(x=>x.key==='mtg:'+ym));
+  ok('现金：加回 2000 再扣 3000', Math.abs(w.eval("cashInfo.balance")-(20000+2000-3000))<0.02, String(w.eval("cashInfo.balance")));
 
   // ⑤ 条目被删了、只剩旧流水：靠备注也能认出来
   ({w,calls}=app(Object.assign({},P0,{autoPay:1,autoFrom:iso(mAgo(0,1))}),[],[oldRow])); await wait(700);
-  ok('固定支出条目已删时，也不会重复扣本月', thisMonth(calls).length===0);
+  ok('固定支出条目已删时，旧流水也被取代', calls.some(x=>x.action==='deleteLedger') && thisMonth(calls).length===1);
 
   // ⑥ 开关已开但条目没停（名称当时没认出来、确认框点了取消）：也会停掉
   ({w,calls}=app(Object.assign({},P0,{autoPay:1,autoFrom:iso(mAgo(0,1))}),[OLD])); await wait(800);
   ok('开关已开时旧条目也不记账', !led(calls).some(x=>x.key.indexOf('fix:fm:')===0));
-  ok('本期只记利息和还本两笔', thisMonth(calls).length===2);
+  ok('本期只记一笔', thisMonth(calls).length===1);
 
   // ⑦ 旧版勾过「跟随房贷」的条目，名称不含房贷也算
   ({w,calls}=app(P0,[Object.assign({},OLD,{id:'fl',name:'Chase 月供',linkProp:true})])); await wait(800);
-  ok('勾过跟随房贷的条目也绑定', !led(calls).some(x=>x.key.indexOf('fix:fl:')===0) && thisMonth(calls).length===2);
+  ok('勾过跟随房贷的条目也绑定', !led(calls).some(x=>x.key.indexOf('fix:fl:')===0) && thisMonth(calls).length===1);
   ok('英文名 Mortgage 能认出', w.eval("isMortgageFixed({name:'Mortgage'})"));
   ok('普通条目不会被误认', !w.eval("isMortgageFixed({name:'车保险'})"));
 
@@ -2297,7 +2291,7 @@ console.log('\n— 固定支出里的房贷 —');
   fv('fx-name','房贷'); fv('fx-amt','1234'); fv('fx-start',iso(mAgo(1,day)));
   w.saveFixed_('Bill & utilities'); await wait(800);
   ok('新加的房贷条目不按 $1234 记账', !led(calls).some(x=>+x.amount===1234 || x.key.indexOf('fix:')===0));
-  ok('新加后本期按房产记账', thisMonth(calls).length===2);
+  ok('新加后本期按房产记账', thisMonth(calls).length===1);
 }
 
 // ══════════════ 三十、房产页：点哪行改哪行 + house loan 绑定 ══════════════
@@ -2380,7 +2374,7 @@ console.log('\n— 房产页：点哪行改哪行 —');
   let r=app(P0,[HH]); await wait(800);
   const fixRec=x=>x.action==='autoLedger'&&x.key.indexOf('fix:hh:')===0;
   ok('house hoan 不再按 2625.84 记账（删掉后不会写回）', !r.calls.some(fixRec));
-  ok('本期按房产记账', r.calls.filter(x=>x.action==='autoLedger'&&x.key.indexOf('mtg:'+ym)===0).length===2);
+  ok('本期按房产记账', r.calls.filter(x=>x.action==='autoLedger'&&x.key==='mtg:'+ym).length===1);
   const saved=JSON.parse(r.w.localStorage.getItem('fixedExpenses_v1'));
   ok('绑定后记住（linkProp）', saved[0].linkProp===true && saved[0].enabled===false);
   ok('House Loan 大小写都认', r.w.eval("isMortgageFixed({name:'House Loan'})"));
@@ -2388,8 +2382,133 @@ console.log('\n— 房产页：点哪行改哪行 —');
   saved[0].name='Rocket';
   let r2=app(Object.assign({},P0,{autoPay:1,autoFrom:iso(mAgo(0,1))}),saved); await wait(700);
   ok('绑定后改名也不断', r2.w.eval("isMortgageFixed(loadFixed()[0])") && !r2.calls.some(x=>x.action==='autoLedger'&&x.key.indexOf('fix:hh:')===0));
-  // 还没删的旧记录：备注带 house hoan 也要认出来，不重复扣
-  const oldRow={row:7,date:due,category:'Bill & utilities',amount:2625.84,note:'house hoan（固定）',key:'fix:hh:'+due};
-  let r3=app(P0,[HH],[oldRow]); await wait(700);
-  ok('旧记录还在时不重复扣', r3.calls.filter(x=>x.action==='autoLedger'&&x.key.indexOf('mtg:'+ym)===0).length===0);
+}
+
+// ══════════════ 三十一、房贷一笔算支出：真实后端端到端 ══════════════
+// 用真实后端 + 真实前端跨多次打开，重放 11 月那次的状态：同一期里同时有固定支出
+// 写的旧金额、旧版拆开的利息和还本，而且条目名字规则认不出来。
+console.log('\n— 房贷一笔算支出（端到端）—');
+{
+  const pad2=(n)=>String(n).padStart(2,'0');
+  const iso=(d)=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const T=new Date(); T.setHours(0,0,0,0);
+  const mAgo=(n,day)=>new Date(T.getFullYear(), T.getMonth()-n, day);
+  const day=Math.min(T.getDate(),28), ym=iso(T).slice(0,7), due=iso(mAgo(0,day));
+  const lastM=iso(mAgo(1,day));
+  const ITEM={id:'hh',name:'Rocket 账单',amount:2625.84,category:'Home',freq:'monthly',start:iso(mAgo(9,day)),enabled:true};
+  const NET={id:'nn',name:'网费',amount:70,category:'Bill & utilities',freq:'monthly',start:iso(T),enabled:true};
+  function world(ledger, items, prop){
+    const tabs={
+      Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']].concat(ledger)),
+      Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price']]),
+      Anchor:mkSheet('Anchor',[['date','amount','note'],[iso(mAgo(6,1)),50000,'起点']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[]),
+      Property:mkSheet('Property',[['Field','Value']].concat(Object.entries(prop))),
+      Config:mkSheet('Config',[['Key','Value'],['fixedExpenses_v1',JSON.stringify(items)]])};
+    const g=backend(tabs);
+    let store={};
+    function open(){
+      const log=[];
+      const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',beforeParse(w){
+        Object.entries(store).forEach(([k,v])=>w.localStorage.setItem(k,v));
+        w.fetch=u=>{ const url=new URL(u), p=Object.fromEntries(url.searchParams); delete p._t;
+          if(p.action) log.push(p);
+          const t=g.doGet({parameter:p}).getContent();
+          return Promise.resolve({json:async()=>JSON.parse(t)}); };
+        w.alert=m=>log.push({alert:m}); w.confirm=()=>true; w.scrollTo=()=>{};
+        w.Element.prototype.scrollIntoView=function(){}; }});
+      return {w:dom.window, log, keep(){ store={}; for(let i=0;i<dom.window.localStorage.length;i++){
+        const k=dom.window.localStorage.key(i); store[k]=dom.window.localStorage.getItem(k); } }};
+    }
+    return {tabs,g,open,month:()=>tabs.Ledger._rows.slice(1).filter(r=>String(r[0]).slice(0,7)===ym)};
+  }
+  const PROP={value:500000,loan:218764,origLoan:350000,rate:6,termYears:30,payment:2125,extra:500,
+              updated:iso(mAgo(1,Math.min(day+1,28))),payDay:day,autoPay:1,autoFrom:iso(mAgo(0,1))};
+  const STATE=[[lastM,'Bill & utilities',2625.84,'Rocket 账单（固定）','fix:hh:'+lastM],
+    [iso(mAgo(0,1)),'Dining',30,'',''],
+    [due,'Bill & utilities',2625.84,'Rocket 账单（固定）','fix:hh:'+due],
+    [due,'Bill & utilities',1093.82,'房贷利息','mtg:'+ym+':int'],
+    [due,'Transfer · 房贷',1531.18,'房贷还本','mtg:'+ym+':prin'],
+    [due,'Dining',45,'after','']];
+
+  // ① 名字认不出来时：不选就保持原样，选了才接管（不猜）
+  let W=world(STATE,[ITEM],PROP);
+  let a=W.open(); await wait(1200); a.keep();
+  const a1=W.month();
+  ok('名字认不出、没选时不动那条固定支出', a1.some(r=>r[4]==='fix:hh:'+due));
+  // ② 在房产「月供」行选 Rocket 账单
+  a.w.go('property'); a.w.openPropEdit('pay');
+  const opts=[...a.w.document.querySelectorAll('#p-link option')].map(o=>o.textContent);
+  ok('月供编辑里能看到全部固定支出', opts.some(x=>x.includes('Rocket 账单')), opts.join(' / '));
+  a.w.document.getElementById('p-link').value='hh';
+  a.w.savePropEdit('pay'); await wait(1200); a.keep();
+  const rows=W.month();
+  const mg=rows.filter(r=>/^mtg:|^fix:/.test(r[4]));
+  ok('同一期只剩一笔', mg.length===1, JSON.stringify(mg));
+  ok('这一笔 key 是整期的', mg[0][4]==='mtg:'+ym);
+  ok('金额 = 月供 + 额外还本 $2,625', Math.abs(mg[0][2]-2625)<0.01, String(mg[0][2]));
+  ok('旧的固定支出、利息、还本都没了', !rows.some(r=>/fix:|:int$|:prin$/.test(r[4])));
+  ok('前后的其他流水没被误删', rows.filter(r=>r[1]==='Dining').map(r=>r[2]).join()==='30,45', rows.map(r=>r[2]).join());
+  ok('全程没有失败提示', !a.log.some(x=>x.alert), JSON.stringify(a.log.filter(x=>x.alert)));
+  ok('以前月份的记录不动', W.tabs.Ledger._rows.some(r=>r[4]==='fix:hh:'+lastM && r[2]===2625.84));
+
+  // ③ 现金和支出：删掉的加回，只扣这一笔
+  const res=J(W.g.doGet({parameter:{}}));
+  ok('服务器现金 = 起点 − 上月旧记录 − 这一笔 − 两笔餐饮', Math.abs(res.cash.balance-(50000-2625.84-2625-75))<0.01, String(res.cash.balance));
+  ok('本月支出全额计入', Math.abs(res.monthly[ym].expense-(2625+75))<0.01, String(res.monthly[ym].expense));
+  ok('不再算进投资转出', res.monthly[ym].transfer===0, String(res.monthly[ym].transfer));
+  ok('前端现金与服务器一致', Math.abs(a.w.eval("cashInfo.balance")-res.cash.balance)<0.01, String(a.w.eval("cashInfo.balance")));
+
+  // ④ 再打开：不回来、不重复（你遇到的「删不掉」）
+  const n0=W.month().length;
+  let b=W.open(); await wait(1200); b.keep();
+  ok('再次打开不写也不删', !b.log.some(x=>x.action==='autoLedger'||x.action==='deleteLedger'), JSON.stringify(b.log.map(x=>x.action)));
+  ok('流水不变', W.month().length===n0);
+  ok('条目停用并记住选择', JSON.parse(W.tabs.Config._rows[1][1])[0].linkProp===true && JSON.parse(W.tabs.Config._rows[1][1])[0].enabled===false);
+
+  // ⑤ 还款记录：一行，拆分来自备注，余额倒推正确
+  b.w.eval("mtgOld=[]");
+  const H=JSON.parse(b.w.eval("JSON.stringify(payHistory())"));
+  ok('还款记录一行', H.length===1 && H[0].kind==='月供' && Math.abs(H[0].pay-2625)<0.01, JSON.stringify(H));
+  ok('利息 + 还本 = 全额', Math.abs(H[0].interest+H[0].principal-2625)<0.02);
+  ok('最新一笔之后的剩余 = 当前余额', H[0].balAfter===b.w.eval("amortizeNow()"));
+
+  // ⑥ 改额外还本后，这笔已记的不变；下一期才用新金额（走 key 去重）
+  b.w.go('property'); b.w.openPropEdit('extra'); b.w.document.getElementById('p-extra').value='800';
+  b.w.savePropEdit('extra'); await wait(900);
+  ok('本期已记过，改设置不重记', W.month().filter(r=>/^mtg:/.test(r[4])).length===1 && Math.abs(W.month().find(r=>/^mtg:/.test(r[4]))[2]-2625)<0.01);
+  b.keep();
+
+  // ⑦ 改选「没有」：条目恢复成普通固定支出
+  let c=W.open(); await wait(1000); c.keep();
+  c.w.go('property'); c.w.openPropEdit('pay');
+  ok('打开时已选中 Rocket 账单', c.w.document.getElementById('p-link').value==='hh');
+  c.w.document.getElementById('p-link').value='';
+  c.w.setPropAuto(0);
+  c.w.savePropEdit('pay'); await wait(600);
+  const cfg=JSON.parse(W.tabs.Config._rows[1][1])[0];
+  ok('选「没有」后恢复普通条目', cfg.linkProp===false && cfg.enabled===true, JSON.stringify(cfg));
+
+  // ⑧ 名字像房贷但明确说不是：不被接管
+  ok('明确说不是的条目，名字再像也不算', !c.w.eval("isMortgageFixed({name:'房贷',linkProp:false})"));
+
+  // 名字认得出的条目：这一笔进它原来的分类
+  const W3=world([],[Object.assign({},ITEM,{name:'房贷',start:iso(T)})],Object.assign({},PROP,{autoPay:0,autoFrom:''}));
+  W3.open(); await wait(1000);
+  const m3=W3.month().find(r=>r[4]==='mtg:'+ym);
+  ok('这一笔进固定支出原来的分类', m3 && m3[1]==='Home', JSON.stringify(m3));
+
+  // ⑨ 删除失败（别的设备改过行号）：不写新的，不会扣两次
+  const W2=world([[due,'Bill & utilities',2000,'房贷（固定）','fix:zz:'+due]],
+                 [Object.assign({},ITEM,{id:'zz',name:'房贷',amount:2000})],PROP);
+  const realGet=W2.g.doGet;
+  let d=W2.open();
+  const origFetch=d.w.fetch;
+  d.w.fetch=u=>{ const p=Object.fromEntries(new URL(u).searchParams);
+    if(p.action==='deleteLedger') return Promise.resolve({json:async()=>({status:'error',message:'数据已变化'})});
+    return origFetch(u); };
+  await wait(1000);
+  ok('删除失败就不写新的那笔', !W2.month().some(r=>r[4]==='mtg:'+ym), JSON.stringify(W2.month()));
 }
