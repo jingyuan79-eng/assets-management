@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V9.4  (2026-11-03)
+ * 资产驾驶舱 · Google Apps Script 后端  V9.5  (2026-11-03)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,13 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V9.5 2026-11-03  RSU 成本改填欧元，按归属日汇率自动换算成美元
+ *   · RSU 表新增三列：F Vest Price EUR、G EURUSD、H FX For；D 列改名 Vest Price (USD)。
+ *     旧表第一次打开时自动补表头
+ *   · 填了欧元、已归属的批次：按归属日的欧洲央行汇率（frankfurter）算出美元成本写进 D 列，
+ *     汇率写 G 列只取一次；改了归属日会重取。F 列留空的旧记录仍按 D 列美元算
+ *   · 首次用到 UrlFetchApp，重新部署时要授权「连接外部服务」
  *
  * V9.4 2026-11-03  RSU：归属表删光时 ASMIY 归零；转账新增「RSU 卖出所得」
  *   · 修：在小程序里把归属表删光后，ASMIY 停在删之前的股数，总额不变。
@@ -1486,8 +1493,12 @@ function saveCar(ss, data) {
 // 为什么 RSU 要从曲线里摘出去：曲线画的是「市值 vs 累计投入」，
 // 而 RSU 你一分钱没掏 —— 算进去会凭空多出一截「收益」，那是薪酬不是投资。
 var RSU_SYM = "ASMIY";                 // 雇主股代码；换雇主改这里
-var RSU_COL = { GRANT:1, DATE:2, SHARES:3, PRICE:4, NOTE:5 };
-var RSU_HEAD = ["Grant", "Vest Date", "Shares", "Vest Price", "Note"];
+var RSU_COL = { GRANT:1, DATE:2, SHARES:3, PRICE:4, NOTE:5, EUR:6, FX:7, FXFOR:8 };
+// D 列是美元成本（成本基准、均价都用它）。F 列填欧元时，D 列由脚本按归属日
+// 的欧洲央行汇率算出来，G 列记汇率，H 列记这个汇率是按哪个归属日取的 ——
+// 改了归属日就会重取。F 列留空的旧记录仍按 D 列的美元算。
+var RSU_HEAD = ["Grant", "Vest Date", "Shares", "Vest Price (USD)", "Note",
+                "Vest Price EUR", "EURUSD", "FX For"];
 
 function rsuSheet(ss) {
   var sh = ss.getSheetByName("RSU");
@@ -1500,8 +1511,13 @@ function rsuSheet(ss) {
 
 function readRsuLots(sh) {
   var last = sh.getLastRow();
-  if (last < 2) return [];
-  var v = sh.getRange(2, 1, last - 1, RSU_HEAD.length).getValues();
+  if (last < 1) return [];
+  var all = sh.getRange(1, 1, last, RSU_HEAD.length).getValues();
+  // 旧表只有 5 列表头：补上欧元 / 汇率三列（只会写一次）
+  if ((all[0][RSU_COL.EUR - 1] || "").toString() !== RSU_HEAD[RSU_COL.EUR - 1]) {
+    sh.getRange(1, 1, 1, RSU_HEAD.length).setValues([RSU_HEAD]);
+  }
+  var v = all.slice(1);
   var out = [];
   for (var i = 0; i < v.length; i++) {
     var d = s2d(v[i][RSU_COL.DATE - 1]);
@@ -1514,11 +1530,47 @@ function readRsuLots(sh) {
       date: d2s(d),
       shares: parseFloat(sharesRaw) || 0,
       price: parseFloat(v[i][RSU_COL.PRICE - 1]) || 0,
-      note: (v[i][RSU_COL.NOTE - 1] || "").toString().trim()
+      note: (v[i][RSU_COL.NOTE - 1] || "").toString().trim(),
+      eur: parseFloat(v[i][RSU_COL.EUR - 1]) || 0,
+      fx: parseFloat(v[i][RSU_COL.FX - 1]) || 0,
+      fxFor: (function (x) { var d = s2d(x); return d && !isNaN(d.getTime()) ? d2s(d) : ""; })(v[i][RSU_COL.FXFOR - 1])
     });
   }
   out.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
   return out;
+}
+
+// 填了欧元成本、已经归属、还没有对应归属日汇率的批次：取汇率，算出美元成本写回 D/G/H。
+// 汇率只在第一次取，之后读 G 列，不会每次打开都联网。取不到（断网、接口挂了）
+// 就先不算，美元成本留空，下次打开再试。
+function convertEurLots(sh, lots, today) {
+  var fetched = 0;
+  for (var i = 0; i < lots.length; i++) {
+    var L = lots[i];
+    if (!(L.eur > 0) || L.date > today) continue;
+    if (!(L.fx > 0) || L.fxFor !== L.date) {
+      if (fetched++ >= 20) continue;                 // 一次最多取 20 个，防止导入大量历史时超时
+      var fx = fetchEurUsd(L.date);
+      if (!(fx > 0)) continue;
+      L.fx = fx; L.fxFor = L.date;
+    }
+    var usd = Math.round(L.eur * L.fx * 10000) / 10000;
+    if (usd === L.price && L.fxFor === L.date) continue;
+    L.price = usd;
+    sh.getRange(L.row, RSU_COL.PRICE, 1, 5).setValues([[usd, L.note, L.eur, L.fx, L.fxFor]]);
+  }
+}
+// 欧洲央行参考汇率（frankfurter，免费、无需密钥）。周末和假日返回之前最近一个工作日的
+function fetchEurUsd(date) {
+  try {
+    var res = UrlFetchApp.fetch("https://api.frankfurter.dev/v1/" + date + "?base=EUR&symbols=USD",
+                                { muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) return 0;
+    var j = JSON.parse(res.getContentText());
+    return (j && j.rates && +j.rates.USD) || 0;
+  } catch (e) {
+    return 0;
+  }
 }
 
 // 把已归属的股数和加权平均成本写回 Stock 表的 ASMIY 行。
@@ -1550,10 +1602,16 @@ function saveRsu(ss, data) {
     var L = lots[i] || {};
     var d = (L.date || "").toString().trim();
     if (!d) continue;                                  // 没填日期的行直接丢掉
+    var eur = parseFloat(L.eur) || 0;
+    // 填了欧元：美元成本由 runRsu 按归属日汇率算；同一归属日已经取过的汇率带回来，不重取
+    var keepFx = eur > 0 && parseFloat(L.fx) > 0 && L.fxFor === d;
     rows.push([(L.grant || "").toString(), d,
                parseFloat(L.shares) || 0,
-               (L.price === "" || L.price == null) ? "" : (parseFloat(L.price) || 0),
-               (L.note || "").toString()]);
+               eur > 0 ? "" : ((L.price === "" || L.price == null) ? "" : (parseFloat(L.price) || 0)),
+               (L.note || "").toString(),
+               eur > 0 ? eur : "",
+               keepFx ? parseFloat(L.fx) : "",
+               keepFx ? d : ""]);
   }
   if (rows.length) sh.getRange(2, 1, rows.length, RSU_HEAD.length).setValues(rows);
   // 在小程序里明确删光了：ASMIY 归零。runRsu 遇到空表不写 Stock（怕清掉手填的股数），
@@ -1573,6 +1631,7 @@ function runRsu(ss) {
   if (!lots.length) return { symbol: RSU_SYM, vestedShares: 0, costBasis: 0, avgCost: 0,
                              pendingShares: 0, nextVest: null, lots: [] };
   var today = d2s(todaySv());
+  convertEurLots(sh, lots, today);
   var vShares = 0, vCost = 0, pShares = 0, next = null;
   for (var i = 0; i < lots.length; i++) {
     if (lots[i].date <= today) {

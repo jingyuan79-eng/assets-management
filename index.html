@@ -480,7 +480,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V9.4';
+const APP_VER='V9.5';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -2502,10 +2502,12 @@ function stockItem(){
 let rsuDraft=null;
 function rsuOpenEditor(){
   const r=rsuInfo||{lots:[]};
+  // eur 是你填的欧元成本；usd / fx / fxFor 是后端算好的，只用来显示和原样带回
   rsuDraft=(r.lots||[]).map(function(x){
-    return {date:x.date||'', shares:x.shares||'', price:(x.price===0?'':x.price)};
+    return {date:x.date||'', shares:x.shares||'', eur:(x.eur>0?x.eur:''),
+            usd:(x.price>0?x.price:''), fx:x.fx||'', fxFor:x.fxFor||''};
   });
-  if(!rsuDraft.length) rsuDraft=[{date:'',shares:'',price:''}];
+  if(!rsuDraft.length) rsuDraft=[{date:'',shares:'',eur:''}];
 }
 function rsuStash(){
   if(!rsuDraft) return;
@@ -2514,12 +2516,24 @@ function rsuStash(){
           p=document.getElementById('rsu-p-'+i);
     if(d) row.date=d.value;
     if(sh) row.shares=sh.value;
-    if(p) row.price=p.value;
+    if(p) row.eur=p.value;
   });
 }
-function rsuAddRow(){ rsuStash(); rsuDraft.push({date:'',shares:'',price:''}); renderRsuEditor(); }
+function rsuAddRow(){ rsuStash(); rsuDraft.push({date:'',shares:'',eur:''}); renderRsuEditor(); }
 function rsuDelRow(i){ rsuStash(); rsuDraft.splice(i,1);
-  if(!rsuDraft.length) rsuDraft=[{date:'',shares:'',price:''}]; renderRsuEditor(); }
+  if(!rsuDraft.length) rsuDraft=[{date:'',shares:'',eur:''}]; renderRsuEditor(); }
+// 每行下面的小字：换算结果，或者为什么还没换算
+function rsuFxNote(row, today){
+  const eur=parseFloat(row.eur);
+  if(eur>0){
+    if(!row.date || row.date>today) return '归属当天按欧洲央行汇率换算成美元';
+    if(row.fx>0 && row.fxFor===row.date && row.usd>0)
+      return '= $'+(+row.usd).toFixed(2)+'（1 € = '+(+row.fx).toFixed(4)+' $，按 '+row.date.slice(5).replace('-','/')+' 汇率）';
+    return '保存后按 '+row.date.replace(/-/g,'/')+' 的汇率换算';
+  }
+  if(row.usd>0) return '旧记录：按美元 $'+(+row.usd).toFixed(2)+' 计。填上欧元就改按汇率换算';
+  return '';
+}
 function renderRsuEditor(){
   const wrap=document.getElementById('rsuEditor');
   if(!wrap || !rsuDraft) return;
@@ -2533,17 +2547,18 @@ function renderRsuEditor(){
     return '<div style="display:flex;gap:5px;align-items:center;margin-bottom:6px">'+
       '<div style="flex:1.25">'+cell('rsu-d-'+i,'date',row.date,'')+'</div>'+
       '<div style="flex:.8">'+cell('rsu-s-'+i,'number',row.shares,'股数','inputmode="decimal"')+'</div>'+
-      '<div style="flex:.9">'+cell('rsu-p-'+i,'number',row.price,'成本$','inputmode="decimal"')+'</div>'+
+      '<div style="flex:.9">'+cell('rsu-p-'+i,'number',row.eur,'成本€','inputmode="decimal"')+'</div>'+
       '<div onclick="rsuDelRow('+i+')" style="width:22px;text-align:center;cursor:pointer;'+
         'color:var(--ink-faint);font-size:16px;line-height:1">×</div>'+
       '<div style="width:26px;font-size:10px;color:'+(vested?'var(--pos)':'var(--ink-faint)')+'">'+
         (row.date?(vested?'已归':'待归'):'')+'</div>'+
-    '</div>';
+    '</div>'+
+    (rsuFxNote(row,today)?'<div class="rsu-fx" style="font-size:10px;color:var(--ink-faint);margin:-3px 0 7px 2px">'+rsuFxNote(row,today)+'</div>':'');
   }).join('');
   wrap.innerHTML=
     '<div style="display:flex;gap:5px;font-size:10px;color:var(--ink-faint);margin-bottom:4px">'+
       '<div style="flex:1.25">归属日期</div><div style="flex:.8">股数</div>'+
-      '<div style="flex:.9">成本 (USD)</div><div style="width:48px"></div></div>'+
+      '<div style="flex:.9">成本 (EUR)</div><div style="width:48px"></div></div>'+
     rows+
     '<div onclick="rsuAddRow()" class="addbox" style="margin:8px 0 10px;padding:9px;'+
       'border-color:var(--stock-ln);background:var(--stock-bg)">'+
@@ -2557,9 +2572,14 @@ function renderRsuEditor(){
 function rsuSave(){
   rsuStash();
   const lots=rsuDraft.filter(function(r){ return r.date && parseFloat(r.shares)>0; })
-    .map(function(r){ return {date:r.date, shares:parseFloat(r.shares)||0,
-                              price:(r.price===''||r.price==null)?'':(parseFloat(r.price)||0)}; });
-  if(!lots.length && rsuDraft.some(function(r){ return r.date||r.shares||r.price; })){
+    .map(function(r){
+      const eur=parseFloat(r.eur)||0;
+      // 填了欧元：美元由后端按归属日汇率算；没填欧元的旧记录原样带回美元
+      return eur>0
+        ? {date:r.date, shares:parseFloat(r.shares)||0, eur:eur, price:'', fx:r.fx||'', fxFor:r.fxFor||''}
+        : {date:r.date, shares:parseFloat(r.shares)||0, eur:'', price:(r.usd>0?+r.usd:'')};
+    });
+  if(!lots.length && rsuDraft.some(function(r){ return r.date||r.shares||r.eur; })){
     alert('每一行都要填归属日期和股数'); return;
   }
   closeStockPanel();

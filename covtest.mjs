@@ -2605,3 +2605,114 @@ console.log('\n— RSU：删减与卖出所得 —');
   w.setXferMode('recurring');
   ok('定期转账里没有 RSU 选项', ![...w.document.querySelectorAll('#x-src option')].some(o=>o.value==='rsu'));
 }
+
+// ══════════════ 三十三、RSU 成本填欧元，按归属日汇率换算 ══════════════
+// 汇率由后端按归属日向欧洲央行参考汇率（frankfurter）取一次，写进 G/H 列缓存；
+// 之后打开不再联网。没填欧元的旧记录仍按 D 列美元。
+console.log('\n— RSU 欧元成本 —');
+{
+  const pad2=(n)=>String(n).padStart(2,'0');
+  const T=new Date(); T.setHours(0,0,0,0);
+  const iso=(d)=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const dd=n=>{ const d=new Date(T); d.setDate(d.getDate()+n); return iso(d); };
+  const A=dd(-300), B=dd(-30), C=dd(60);
+  const RATES={[A]:1.10,[B]:1.20};
+  let hits=[];
+  globalThis.UrlFetchApp={fetch(url){ hits.push(url);
+    const d=/v1\/(\d{4}-\d{2}-\d{2})\?base=EUR&symbols=USD/.exec(url)[1];
+    const r=RATES[d];
+    return {getResponseCode:()=>r?200:404,
+            getContentText:()=>JSON.stringify(r?{amount:1,base:'EUR',date:d,rates:{USD:r}}:{message:'not found'})}; }};
+  const tabs={
+    Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+    Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price'],['ASMIY','Semiconductor',0,0,50]]),
+    Anchor:mkSheet('Anchor',[['date','amount','note']]),
+    Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+    Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+    Ledger_monthly:mkSheet('Ledger_monthly',[]),
+    // 旧表：5 列，A 那笔是以前填的美元
+    RSU:mkSheet('RSU',[['Grant','Vest Date','Shares','Vest Price','Note'],['',A,100,20,'旧']])};
+  const g=backend(tabs);
+  const out=()=>J(g.doGet({parameter:{}}));
+
+  let r=out();
+  ok('旧表自动补上欧元/汇率三列表头', tabs.RSU._rows[0][5]==='Vest Price EUR' && tabs.RSU._rows[0][3]==='Vest Price (USD)');
+  ok('旧的美元记录照旧：成本基准 = 100 × 20', r.rsu.costBasis===2000, String(r.rsu.costBasis));
+  ok('旧记录不联网', hits.length===0);
+
+  // 小程序保存：旧的一笔原样带回美元，新填两笔欧元（一笔已归属，一笔未来）
+  const lots=[{date:A,shares:100,eur:'',price:20},{date:B,shares:50,eur:30,price:''},{date:C,shares:80,eur:40,price:''}];
+  const sv=J(g.doGet({parameter:{action:'saveRsu', lots:JSON.stringify(lots)}}));
+  const rowB=tabs.RSU._rows.find(x=>x[1]===B), rowC=tabs.RSU._rows.find(x=>x[1]===C);
+  ok('已归属那笔：美元成本 = 30 € × 1.20 = 36', rowB[3]===36, JSON.stringify(rowB));
+  ok('汇率和取汇率的日期写进 Sheet', rowB[5]===30 && rowB[6]===1.2 && rowB[7]===B);
+  ok('未来那笔先不换算，美元留空', rowC[3]==='' && rowC[6]==='', JSON.stringify(rowC));
+  ok('按归属日取汇率，未来那笔不联网', hits.length===1 && hits[0].includes(B), hits.join(' '));
+  ok('成本基准 = 2000 + 50 × 36', sv.rsu.costBasis===3800, String(sv.rsu.costBasis));
+  ok('写回 Stock 的均价 = 3800 / 150', Math.abs(tabs.Stock._rows[1][3]-25.3333)<0.0001, String(tabs.Stock._rows[1][3]));
+  ok('总额不受成本影响：股数 150', tabs.Stock._rows[1][2]===150);
+
+  // 再打开：不再联网
+  hits=[]; out();
+  ok('汇率只取一次，之后打开不联网', hits.length===0);
+
+  // 小程序再保存一次（汇率原样带回）：仍不联网
+  const back=out().rsu.lots.map(x=>({date:x.date,shares:x.shares,eur:x.eur||'',price:x.eur?'':x.price,fx:x.fx,fxFor:x.fxFor}));
+  J(g.doGet({parameter:{action:'saveRsu', lots:JSON.stringify(back)}}));
+  ok('再保存时带回已取的汇率，不重取', hits.length===0, hits.join(' '));
+  ok('再保存后美元成本不变', tabs.RSU._rows.find(x=>x[1]===B)[3]===36);
+
+  // 改了归属日：重取
+  RATES[dd(-29)]=1.25;
+  const moved=back.map(x=>x.date===B?Object.assign({},x,{date:dd(-29)}):x);
+  J(g.doGet({parameter:{action:'saveRsu', lots:JSON.stringify(moved)}}));
+  ok('改了归属日就按新日期重取汇率', tabs.RSU._rows.find(x=>x[1]===dd(-29))[3]===37.5, JSON.stringify(tabs.RSU._rows.find(x=>x[1]===dd(-29))));
+
+  // 取不到汇率：美元先留空，下次再试
+  const tabs2=Object.assign({},tabs,{RSU:mkSheet('RSU',[['Grant','Vest Date','Shares','Vest Price (USD)','Note','Vest Price EUR','EURUSD','FX For'],
+    ['',dd(-10),10,'','',50,'','']]),Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price'],['ASMIY','Semiconductor',0,0,50]])});
+  const g2=backend(tabs2);
+  hits=[]; J(g2.doGet({parameter:{}}));
+  ok('取不到汇率时美元成本留空，不写错数', tabs2.RSU._rows[1][3]==='' && hits.length===1);
+  ok('取不到汇率不影响股数和总额', tabs2.Stock._rows[1][2]===10);
+  RATES[dd(-10)]=1.15; hits=[]; J(g2.doGet({parameter:{}}));
+  ok('下次打开自动补上', tabs2.RSU._rows[1][3]===57.5 && hits.length===1, String(tabs2.RSU._rows[1][3]));
+
+  // 到了归属日：未来那笔在当天打开时自动换算（把归属日改成今天模拟）
+  delete globalThis.UrlFetchApp;
+
+  // 前端编辑器：第三格是欧元，下面显示换算结果
+  const RSU={symbol:'ASMIY',vestedShares:150,costBasis:3800,avgCost:25.3333,pendingShares:80,
+    nextVest:{date:C,shares:80},
+    lots:[{date:A,shares:100,price:20,eur:0,fx:0,fxFor:''},
+          {date:B,shares:50,price:36,eur:30,fx:1.2,fxFor:B},
+          {date:C,shares:80,price:0,eur:40,fx:0,fxFor:''}]};
+  const calls=[];
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',beforeParse(w){
+    w.localStorage.clear();
+    w.fetch=u=>{ const p=Object.fromEntries(new URL(u).searchParams);
+      if(p.action){ calls.push(p); return Promise.resolve({json:async()=>({status:'success',rsu:RSU})}); }
+      return Promise.resolve({json:async()=>({status:'success',stock:[{symbol:'ASMIY',category:'Semiconductor',shares:150,cost:25.3333,price:50}],
+        expense:{},ledger:[],monthly:{},ledgerMonths:[],cash:{balance:0,hasAnchor:false},savings:[],bond:[],notices:[],
+        hsa:null,retire:[],config:{},property:null,car:null,rsu:RSU,stockHistory:[],serverDate:iso(T)})}); };
+    w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{}; w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window; await wait(800);
+  w.eval("openDetail('stock')");
+  const gi=w.eval("DATA.stock.groups.findIndex(g=>g.holdings.some(h=>h.sym==='ASMIY'))");
+  const hi=w.eval("DATA.stock.groups["+gi+"].holdings.findIndex(h=>h.sym==='ASMIY')");
+  w.showStockPanel(gi,hi);
+  const ed=w.document.getElementById('rsuEditor');
+  ok('表头是 成本 (EUR)', /成本 \(EUR\)/.test(ed.textContent));
+  ok('欧元格显示 30 / 40，旧记录欧元格为空',
+     w.document.getElementById('rsu-p-0').value==='' && w.document.getElementById('rsu-p-1').value==='30' &&
+     w.document.getElementById('rsu-p-2').value==='40');
+  const notes=[...ed.querySelectorAll('.rsu-fx')].map(x=>x.textContent);
+  ok('已换算的显示美元和汇率', notes.some(t=>t.includes('$36.00') && t.includes('1.2000')), notes.join(' | '));
+  ok('旧记录标明按美元', notes.some(t=>/旧记录/.test(t) && t.includes('$20.00')));
+  ok('未来那笔标明归属当天换算', notes.some(t=>/归属当天/.test(t)));
+  w.rsuSave(); await wait(300);
+  const sent=JSON.parse(calls.find(c=>c.action==='saveRsu').lots);
+  ok('保存：旧记录带美元，新记录带欧元和已取的汇率',
+     sent[0].price===20 && sent[0].eur==='' && sent[1].eur===30 && sent[1].fx===1.2 && sent[1].fxFor===B && sent[2].eur===40,
+     JSON.stringify(sent));
+}
