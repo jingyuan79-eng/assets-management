@@ -2512,3 +2512,96 @@ console.log('\n— 房贷一笔算支出（端到端）—');
   await wait(1000);
   ok('删除失败就不写新的那笔', !W2.month().some(r=>r[4]==='mtg:'+ym), JSON.stringify(W2.month()));
 }
+
+// ══════════════ 三十二、RSU：删减股数、删光，以及卖出所得 ══════════════
+// 归属表是 ASMIY 股数的唯一来源；删一笔或减股数只是改记录，钱不会自动去哪。
+// 卖出所得由用户在转账里手动输入到账金额，只加到账账户，不扣任何账户。
+console.log('\n— RSU：删减与卖出所得 —');
+{
+  const pad2=(n)=>String(n).padStart(2,'0');
+  const T=new Date(); T.setHours(0,0,0,0);
+  const iso=(d)=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const dd=n=>{ const d=new Date(T); d.setDate(d.getDate()+n); return iso(d); };
+  const ym=iso(T).slice(0,7);
+  const tabs={
+    Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+    Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price'],
+      ['NVDA','Semiconductor',10,100,200],['ASMIY','Semiconductor',220,25.4545,50],
+      ['VOO','IndexETF',10,400,600],['Cash','Gold.coin.cash','','',1000]]),
+    Anchor:mkSheet('Anchor',[['date','amount','note'],[dd(-100),20000,'起点']]),
+    Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status']]),
+    Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+    Ledger_monthly:mkSheet('Ledger_monthly',[]),
+    RSU:mkSheet('RSU',[['Grant','Vest Date','Shares','Vest Price','Note'],
+      ['',dd(-200),100,20,''],['',dd(-20),120,30,''],['',dd(60),150,'','']])};
+  const g=backend(tabs);
+  const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',beforeParse(w){
+    w.localStorage.clear();
+    w.fetch=u=>{ const p=Object.fromEntries(new URL(u).searchParams); delete p._t;
+      const t=g.doGet({parameter:p}).getContent(); return Promise.resolve({json:async()=>JSON.parse(t)}); };
+    w.alert=m=>{ w.__alert=m; }; w.confirm=()=>true; w.scrollTo=()=>{};
+    w.Element.prototype.scrollIntoView=function(){}; }});
+  const w=dom.window; await wait(1200);
+  const asm=()=>tabs.Stock._rows.find(r=>r[0]==='ASMIY')[2];
+  const semi=()=>{ const gr=w.eval("DATA.stock.groups").find(x=>x.cat==='半导体');
+    return gr.holdings.reduce((a,h)=>a+(h.shares||0)*(h.price||0),0); };
+  const grand=()=>{ w.eval("computeTotals()"); return w.eval("grand"); };
+  async function save(lots){ w.rsuOpenEditor(); w.eval("rsuDraft="+JSON.stringify(lots)); w.eval("rsuStash=function(){}");
+    w.rsuSave(); await wait(1200); }
+  const L0=[{date:dd(-200),shares:100,price:20},{date:dd(-20),shares:120,price:30},{date:dd(60),shares:150,price:''}];
+  const g0=grand(), s0=semi();
+  ok('初始：半导体 = NVDA 2000 + ASMIY 220×50', s0===13000, String(s0));
+
+  // ① 减少某一笔的股数：120 → 70
+  await save([L0[0],{date:dd(-20),shares:70,price:30},L0[2]]);
+  ok('减 50 股后 Sheet 里 ASMIY = 170', asm()===170, String(asm()));
+  ok('半导体大类少 50×50 = 2500', semi()===s0-2500, String(semi()));
+  ok('投资总额少 2500', grand()===g0-2500, `${g0} → ${grand()}`);
+  ok('股票页 ASMIY 显示 170 股', w.eval("findHolding('ASMIY').shares")===170);
+
+  // ② 删掉一笔
+  await save([{date:dd(-20),shares:70,price:30},L0[2]]);
+  ok('删掉 100 股那笔后 ASMIY = 70', asm()===70, String(asm()));
+  ok('总额跟着少 5000', grand()===g0-7500);
+  ok('删减不动现金、不记流水', tabs.Ledger._rows.length===1 && w.eval("cashInfo.balance")===20000);
+
+  // ③ 全部删光（原来的 bug：ASMIY 停在删之前的股数）
+  await save([]);
+  ok('删光后 ASMIY = 0', asm()===0, String(asm()));
+  ok('删光后总额去掉全部 RSU', grand()===g0-11000, `${g0} → ${grand()}`);
+  ok('删光后半导体只剩 NVDA', semi()===2000, String(semi()));
+  ok('价格列不被碰', tabs.Stock._rows.find(r=>r[0]==='ASMIY')[4]===50);
+  J(g.doGet({parameter:{}}));
+  ok('删光后再打开仍是 0（不会被读路径改回）', asm()===0);
+
+  // ④ 卖出所得：RSU → Chase，填到账金额
+  w.openTransfer(); w.setXferMode('once');
+  const srcOpts=[...w.document.querySelectorAll('#x-src option')].map(o=>o.value);
+  ok('转账来源里有 RSU', srcOpts.includes('rsu'));
+  w.document.getElementById('x-src').value='rsu'; w.xferSrcHint();
+  ok('选 RSU 时提示填到账金额、去归属表减股数',
+     /到账/.test(w.document.getElementById('x-hint').textContent) && /归属表/.test(w.document.getElementById('x-hint').textContent));
+  const cash0=w.eval("cashInfo.balance"), gb=grand();
+  w.document.getElementById('x-tgt').value='chase';
+  w.document.getElementById('x-amt').value='3456.78';
+  w.submitOneTime(); await wait(500);
+  const row=tabs.Ledger._rows.find(r=>r[1]==='Redeem · RSU');
+  ok('Ledger 记一笔 Redeem · RSU 3456.78', row && row[2]===3456.78, JSON.stringify(row));
+  ok('Chase 多 3456.78', Math.abs(w.eval("cashInfo.balance")-(cash0+3456.78))<0.005, String(w.eval("cashInfo.balance")));
+  ok('总额多 3456.78（凭空出现）', Math.abs(grand()-(gb+3456.78))<1, `${gb} → ${grand()}`);
+  ok('不扣任何账户：ASMIY 和券商现金不变', asm()===0 && tabs.Stock._rows.find(r=>r[0]==='Cash')[4]===1000);
+  const res=J(g.doGet({parameter:{}}));
+  ok('不算收入：本月净收入为 0', res.monthly[ym].income===0 && res.monthly[ym].net===0, JSON.stringify(res.monthly[ym]));
+  ok('算进本金回流', Math.abs(res.monthly[ym].redeem-3456.78)<0.005);
+  ok('服务器现金一致', Math.abs(res.cash.balance-(20000+3456.78))<0.005, String(res.cash.balance));
+
+  // ⑤ 只能进银行账户；定期转账里没有 RSU
+  w.renderTransfer();
+  w.document.getElementById('x-src').value='rsu';
+  w.document.getElementById('x-tgt').value='broker';
+  w.document.getElementById('x-amt').value='100';
+  w.__alert=null; w.submitOneTime(); await wait(200);
+  ok('RSU 不能转进股票账户现金', /Chase 或 Marcus/.test(w.__alert||'') && !tabs.Ledger._rows.some(r=>r[2]===100));
+  w.setXferMode('recurring');
+  ok('定期转账里没有 RSU 选项', ![...w.document.querySelectorAll('#x-src option')].some(o=>o.value==='rsu'));
+}

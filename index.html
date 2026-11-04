@@ -480,7 +480,7 @@ cleanLegacyKeys(); loadStock();
 // 前后端共用同一个号（AppsScript.gs 文件头也写这个），便于对照是否同步上线。
 // 它同时用来确认手机上打开的到底是不是新版 —— iOS 把网页加到主屏后会
 // 缓存 HTML，光看界面分不出新旧。
-const APP_VER='V9.3';
+const APP_VER='V9.4';
 
 // ==================== Google Sheet 接口 ====================
 const SHEET_API = "https://script.google.com/macros/s/AKfycbzDitRTeV-EEm9ZIpu-YRXtx62xQH9UXMGBDtaYBu9sto0ilh0VGNq2MRhDY68xHDKnAA/exec";
@@ -3149,7 +3149,7 @@ function sourceBalance(key){
 // 转账：从 Chase 出去的钱记进 Ledger（Transfer 前缀，不算支出），
 // 从 Marcus 出去的由 Savings 引擎处理；到账端一律按增量写。
 function transferLabel(key){
-  return key==='broker'?'券商':key==='mortgage'?'房贷':key==='marcus'?'Marcus':key==='bond'?'国债':key;
+  return key==='broker'?'券商':key==='mortgage'?'房贷':key==='marcus'?'Marcus':key==='bond'?'国债':key==='rsu'?'RSU':key;
 }
 function deductSource(key, amt, tgtKey, dateStr, dedupeKey){
   if(key==='chase'){
@@ -3170,6 +3170,7 @@ function deductSource(key, amt, tgtKey, dateStr, dedupeKey){
   }else if(key==='broker'){
     adjustBrokerCash(-amt);
   }
+  // rsu：不扣任何账户。卖掉的股数在股票页的归属表里自己减，到账金额由这里加上
 }
 function addToTarget(key, amt, srcKey, dateStr, dedupeKey){
   if(key==='chase'){
@@ -3317,7 +3318,10 @@ function runRecurring(){
 }
 
 // ==================== 转账页 ====================
-const SRC_OPTS=[{k:'chase',n:'Checking - Chase'},{k:'marcus',n:'Marcus OS-9250'},{k:'broker',n:'股票账户现金'}];
+const SRC_OPTS=[{k:'chase',n:'Checking - Chase'},{k:'marcus',n:'Marcus OS-9250'},{k:'broker',n:'股票账户现金'},
+                {k:'rsu',n:'RSU（卖出所得）'}];
+// 卖 RSU 的钱只能进银行账户：进券商现金会被股票曲线当成收益（曲线不含 RSU，也没有对应的入金）
+const RSU_TGTS=['chase','marcus'];
 const TGT_OPTS=[{k:'broker',n:'股票账户现金'},{k:'chase',n:'Checking - Chase'},{k:'mortgage',n:'房贷（还款）'},{k:'marcus',n:'Marcus 活期 OS'}];
 function optName(list,k){ const o=list.find(x=>x.k===k); return o?o.n:k; }
 function openTransfer(){ renderTransfer(); go('transfer'); }
@@ -3380,11 +3384,13 @@ function renderTransfer(){
 const XFER_SEL='';
 function transferFormFields(p, withFreq){
   let h='<div class="fld" style="margin-bottom:8px"><label>From</label>'+
-      '<select id="'+p+'-src" style="'+XFER_SEL+'">'+SRC_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
+      '<select id="'+p+'-src" style="'+XFER_SEL+'" onchange="xferSrcHint()">'+
+        SRC_OPTS.filter(o=>!(withFreq && o.k==='rsu')).map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
     '<div class="fld" style="margin-bottom:8px"><label>To</label>'+
       '<select id="'+p+'-tgt" style="'+XFER_SEL+'">'+TGT_OPTS.map(o=>'<option value="'+o.k+'">'+o.n+'</option>').join('')+'</select></div>'+
     '<div class="fld" style="margin-bottom:8px"><label>金额 ($)</label>'+
-      '<input id="'+p+'-amt" type="number" inputmode="decimal" placeholder="例：500"></div>';
+      '<input id="'+p+'-amt" type="number" inputmode="decimal" placeholder="例：500"></div>'+
+    '<div id="'+p+'-hint" style="font-size:11px;color:var(--ink-faint);margin:-2px 0 8px;line-height:1.5"></div>';
   if(withFreq){
     h+='<div class="fld" style="margin-bottom:8px"><label>频率</label>'+
       '<select id="'+p+'-freq" style="'+XFER_SEL+'">'+
@@ -3396,12 +3402,20 @@ function transferFormFields(p, withFreq){
   }
   return h;
 }
+function xferSrcHint(){
+  const s=document.getElementById('x-src'), h=document.getElementById('x-hint');
+  if(!s || !h) return;
+  h.textContent = s.value==='rsu'
+    ? '填银行实际到账的美元金额（已扣手续费、已换汇）。卖掉的股数请到股票页点 ASMIY，在归属表里减掉'
+    : '';
+}
 function submitOneTime(){
   const src=document.getElementById('x-src').value;
   const tgt=document.getElementById('x-tgt').value;
   const amt=parseFloat(document.getElementById('x-amt').value);
   if(!(amt>0)){ alert('请输入金额'); return; }
   if(src===tgt){ alert('转出和转入不能是同一个账户'); return; }
+  if(src==='rsu' && RSU_TGTS.indexOf(tgt)<0){ alert('卖 RSU 的钱请转入 Chase 或 Marcus'); return; }
   if((tgt==='broker'||src==='broker') && !syncOk){
     if(!confirm('当前与 Google Sheet 同步失败。\n此时转入券商现金可能在下次同步时被覆盖。\n仍要继续吗？')) return;
   }
@@ -3419,6 +3433,7 @@ function submitRecurring(){
   if(!(amt>0)){ alert('请输入金额'); return; }
   if(src===tgt){ alert('转出和转入不能是同一个账户'); return; }
   if(!start){ alert('请选择首次转账日'); return; }
+  if(src==='rsu'){ alert('卖 RSU 只能用一次性转账'); return; }
   const list=loadRecurring();
   // lastRun 留空：首次转账日到了就执行；设在未来则等到那天
   list.push({src:src, tgt:tgt, amt:Math.round(amt), freq:freq, start:start, lastRun:null});

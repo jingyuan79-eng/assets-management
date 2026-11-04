@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V9.3  (2026-11-01)
+ * 资产驾驶舱 · Google Apps Script 后端  V9.4  (2026-11-03)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,13 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V9.4 2026-11-03  RSU：归属表删光时 ASMIY 归零；转账新增「RSU 卖出所得」
+ *   · 修：在小程序里把归属表删光后，ASMIY 停在删之前的股数，总额不变。
+ *     现在 saveRsu 保存空表时把 ASMIY 写成 0 股。读路径遇到空表仍然不动
+ *     Stock（表刚建、还没填时，ASMIY 的股数是手填的）
+ *   · 前端转账新增来源「RSU（卖出所得）」：只加到账账户，不扣任何账户，
+ *     到 Chase 记 Redeem · RSU（加现金，不算收入）。后端无需改动
  *
  * V9.3 2026-11-01  房贷每期只记一笔：月供 + 额外还本，全额算支出（纯前端，后端未变）
  *
@@ -1549,6 +1556,9 @@ function saveRsu(ss, data) {
                (L.note || "").toString()]);
   }
   if (rows.length) sh.getRange(2, 1, rows.length, RSU_HEAD.length).setValues(rows);
+  // 在小程序里明确删光了：ASMIY 归零。runRsu 遇到空表不写 Stock（怕清掉手填的股数），
+  // 原来这里也没写，删光后 ASMIY 停在删之前的股数，总额不变
+  else syncRsuToStock(ss, 0, 0);
   return { status: "success", type: "saveRsu",
            rsu: safeRun(function () { return runRsu(ss); }, null) };
 }
@@ -1558,6 +1568,8 @@ function runRsu(ss) {
   // 你在 Sheet 里看不到也就无从填写（Property / Config 踩过同一个坑）
   var sh = rsuSheet(ss);
   var lots = readRsuLots(sh);
+  // 空表时不动 Stock：表刚建出来、还没填的时候，ASMIY 的股数是你手填的，不能清掉。
+  // 在小程序里把归属表删光，由 saveRsu 负责归零
   if (!lots.length) return { symbol: RSU_SYM, vestedShares: 0, costBasis: 0, avgCost: 0,
                              pendingShares: 0, nextVest: null, lots: [] };
   var today = d2s(todaySv());
