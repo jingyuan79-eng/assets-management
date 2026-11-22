@@ -1751,9 +1751,12 @@ console.log('\n— 转账：股票账户 → Chase —');
   d.getElementById('x-src').value='broker';
   d.getElementById('x-tgt').value='chase';
   d.getElementById('x-amt').value='1500';
-  w.submitOneTime(); await wait(400);
+  w.submitOneTime();
+  // 这个假后端的读取永远返回固定现金，转账后的重拉会把它盖回去，所以在重拉前检查
+  const cashNow=w.eval("cashInfo.balance");
+  await wait(400);
   ok('券商现金减 1500', w.eval("brokerCashItem().mv")===broker0-1500, String(w.eval("brokerCashItem().mv")));
-  ok('Chase 流动现金加 1500', w.eval("cashInfo.balance")===cash0+1500, String(w.eval("cashInfo.balance")));
+  ok('Chase 流动现金加 1500', cashNow===cash0+1500, String(cashNow));
   const led=calls.find(c=>c.action==='addLedger');
   ok('Ledger 记一笔 Redeem · 券商', led && led.category==='Redeem · 券商' && +led.amount===1500,
      JSON.stringify(led));
@@ -2797,4 +2800,62 @@ console.log('\n— StockHistory 入金 —');
   b.w.doTransfer('chase','broker',50); await wait(600);
   ok('Chase → 股票账户不重复记中转流水',
      tabs.Ledger._rows.slice(1).filter(r=>r[2]===50).length===1);
+}
+
+// ══════════════ 三十五、转账进出股票账户后的同步顺序 ══════════════
+// 重拉（整表读取）必须排在所有写操作之后，否则拿回的流水缺刚写的几行，
+// 本地被覆盖、现金算错、StockHistory 要等下次打开才更新。
+console.log('\n— 转账同步顺序 —');
+{
+  const pad2=(n)=>String(n).padStart(2,'0');
+  const T=new Date(); T.setHours(0,0,0,0);
+  const iso=(d)=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const dd=n=>{ const d=new Date(T); d.setDate(d.getDate()+n); return iso(d); };
+  const ym=iso(T).slice(0,7);
+  function world(){
+    const tabs={
+      Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+      Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price'],['VOO','IndexETF',100,500,600],['Cash','Gold.coin.cash','','',1000]]),
+      Anchor:mkSheet('Anchor',[['date','amount','note'],[dd(-100),20000,'起点']]),
+      Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status'],
+        ['sv_os','OS-9250','OS',10000,0.035,dd(0),'','','active']]),
+      Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+      Ledger_monthly:mkSheet('Ledger_monthly',[]),
+      StockHistory:mkSheet('StockHistory',[['年月','月初account value','本月净入金','月末account value','本月投资收益','月收益率'],
+        [ym,60000,0,61000,1000,0.0167]])};
+    const g=backend(tabs); const log=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',beforeParse(w){
+      w.localStorage.clear();
+      w.fetch=u=>{ const p=Object.fromEntries(new URL(u).searchParams); delete p._t;
+        log.push(p.action||'READ');
+        const t=g.doGet({parameter:p}).getContent(); return Promise.resolve({json:async()=>JSON.parse(t)}); };
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{}; w.Element.prototype.scrollIntoView=function(){}; }});
+    return {tabs,log,w:dom.window};
+  }
+  async function send(W,src,tgt,amt){
+    W.w.openTransfer(); W.w.setXferMode('once');
+    W.w.document.getElementById('x-src').value=src; W.w.document.getElementById('x-tgt').value=tgt;
+    W.w.document.getElementById('x-amt').value=String(amt);
+    W.log.length=0; W.w.submitOneTime(); await wait(1200);
+  }
+  let W=world(); await wait(1500);
+  await send(W,'marcus','broker',300);
+  const reads=W.log.map((x,i)=>x==='READ'?i:-1).filter(i=>i>=0);
+  ok('Marcus → 股票账户：4 个写操作全部完成后才重拉一次',
+     reads.length===1 && reads[0]===W.log.length-1 && W.log.length===5, W.log.join(' → '));
+  ok('重拉后本地仍有这对流水', W.w.eval("ledgerRows.filter(r=>r.amount===300).length")===2);
+  ok('重拉后 Chase 现金不变', W.w.eval("cashInfo.balance")===20000, String(W.w.eval("cashInfo.balance")));
+  ok('StockHistory 本月 C 列当场更新', W.tabs.StockHistory._rows[1][2]===300);
+  ok('小程序曲线当场更新', W.w.eval("stockHistory").slice(-1)[0].invested===300);
+
+  await send(W,'marcus','broker',200.5);
+  ok('带分的金额：Marcus 扣 200.50，不是 201', W.tabs.Savings._rows[1][3]===9499.5, String(W.tabs.Savings._rows[1][3]));
+  ok('券商现金加 200.50', W.tabs.Stock._rows.find(r=>r[0]==='Cash')[4]===1500.5);
+
+  await send(W,'chase','broker',100);
+  ok('Chase → 股票账户也当场更新 StockHistory', W.tabs.StockHistory._rows[1][2]===600.5, String(W.tabs.StockHistory._rows[1][2]));
+  ok('Chase → 股票账户：只记一条 Transfer · 券商', W.tabs.Ledger._rows.slice(1).filter(r=>r[2]===100).length===1);
+
+  await send(W,'chase','marcus',50);
+  ok('不涉及股票账户的转账不额外重拉（Marcus 那步除外）', W.log.filter(x=>x==='READ').length===1, W.log.join(' → '));
 }

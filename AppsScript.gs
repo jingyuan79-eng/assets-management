@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V9.6  (2026-11-21)
+ * 资产驾驶舱 · Google Apps Script 后端  V9.7  (2026-11-21)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,8 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V9.7 2026-11-21  转账后重拉的时机与 Marcus 金额取整（纯前端，后端未变）
  *
  * V9.6 2026-11-21  StockHistory 漏记 Marcus → 股票账户的入金
  *   · 前端：两头都不是 Chase 的转账补记一对流水（Redeem · 来源 / Transfer · 去向，
