@@ -2716,3 +2716,85 @@ console.log('\n— RSU 欧元成本 —');
      sent[0].price===20 && sent[0].eur==='' && sent[1].eur===30 && sent[1].fx===1.2 && sent[1].fxFor===B && sent[2].eur===40,
      JSON.stringify(sent));
 }
+
+// ══════════════ 三十四、StockHistory 漏记不经过 Chase 的入金 ══════════════
+// 重放 2026-11 的真实情况：定期转账 Marcus → 股票账户每两周 $200，已执行 3 次，
+// 但这种转账原来不写流水，StockHistory 的本月净入金（C 列）只认流水，10/11 月都是 0。
+console.log('\n— StockHistory 入金 —');
+{
+  const pad2=(n)=>String(n).padStart(2,'0');
+  const T=new Date(); T.setHours(0,0,0,0);
+  const iso=(d)=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const dd=n=>{ const d=new Date(T); d.setDate(d.getDate()+n); return d; };
+  const ymOf=d=>iso(d).slice(0,7);
+  const start=dd(-33), runs=[start,dd(-19),dd(-5)];
+  const cur=ymOf(T), prev=ymOf(new Date(T.getFullYear(),T.getMonth()-1,1)), prev2=ymOf(new Date(T.getFullYear(),T.getMonth()-2,1));
+  const byMonth=ym=>runs.filter(d=>ymOf(d)===ym).length*200;
+  const REC=[{src:'marcus',tgt:'broker',amt:200,freq:'biweekly',start:iso(start),lastRun:iso(runs[2]),id:'x1y1d4zv'}];
+  const tabs={
+    Ledger:mkSheet('Ledger',[['Date','category','amount','note','key']]),
+    Stock:mkSheet('Stock',[['Symbol','Category','Share','Cost','Price'],['VOO','IndexETF',100,500,600],['Cash','Gold.coin.cash','','',1000]]),
+    Anchor:mkSheet('Anchor',[['date','amount','note'],[iso(dd(-100)),20000,'起点']]),
+    Savings:mkSheet('Savings',[['ID','Name','Type','Balance','Rate','Last Post','Next update','Maturity','Status'],
+      ['sv_os','OS-9250','OS',10000,0.035,iso(dd(-1)),'','','active']]),
+    Bond:mkSheet('Bond',[['ID','Name','Type','Start','Term','Rate','Principal','Balance','LastPost','Status']]),
+    Ledger_monthly:mkSheet('Ledger_monthly',[]),
+    StockHistory:mkSheet('StockHistory',[['年月','月初account value','本月净入金','月末account value','本月投资收益','月收益率'],
+      ['2022',0,7500,7572,72,0.0096],
+      [prev2,50000,1000,52000,1000,0.0196],
+      [prev,52000,0,60000,8000,0.1538],
+      [cur,60000,0,61000,1000,0.0167]]),
+    Config:mkSheet('Config',[['key','value'],['recurringTransfers_v1',JSON.stringify(REC)]])};
+  const g=backend(tabs);
+  function open(){
+    const log=[];
+    const dom=new JSDOM(html,{runScripts:'dangerously',url:'https://x.test/',beforeParse(w){
+      w.localStorage.clear();
+      w.fetch=u=>{ const p=Object.fromEntries(new URL(u).searchParams); delete p._t;
+        if(p.action) log.push(p);
+        const t=g.doGet({parameter:p}).getContent(); return Promise.resolve({json:async()=>JSON.parse(t)}); };
+      w.alert=()=>{}; w.confirm=()=>true; w.scrollTo=()=>{}; w.Element.prototype.scrollIntoView=function(){}; }});
+    return {w:dom.window, log};
+  }
+  const hist=ym=>tabs.StockHistory._rows.find(r=>r[0]===ym);
+  let a=open(); await wait(1500);
+  const L=tabs.Ledger._rows.slice(1);
+  const ins=L.filter(r=>r[1]==='Redeem · Marcus'), outs=L.filter(r=>r[1]==='Transfer · 券商');
+  ok('回补已执行的 3 次：每次一对流水', ins.length===3 && outs.length===3, L.map(r=>r[0]+' '+r[1]).join(' | '));
+  ok('日期就是执行日', outs.map(r=>r[0]).join()===runs.map(iso).join());
+  ok('金额 200，备注写明来源去向', outs.every(r=>r[2]===200 && r[3]==='Marcus → 券商'));
+  ok('key 按定期转账编号 + 日期，防重复', outs.every(r=>/^xfer:x1y1d4zv:\d{4}-\d{2}-\d{2}:out$/.test(r[4])));
+  ok('只补流水，不再动 Marcus 和券商现金',
+     tabs.Savings._rows[1][3]===10000 && tabs.Stock._rows.find(r=>r[0]==='Cash')[4]===1000 &&
+     !a.log.some(x=>x.action==='adjustSaving' || x.action==='updateCash'));
+  const res=J(g.doGet({parameter:{}}));
+  ok('流动现金不受影响（净 0）', Math.abs(res.cash.balance-20000)<0.005, String(res.cash.balance));
+  ok('本月 C 列 = 本月的执行次数 × 200', hist(cur)[2]===byMonth(cur), `${hist(cur)[2]} 应 ${byMonth(cur)}`);
+  ok('上个月 C 列补上', hist(prev)[2]===byMonth(prev), `${hist(prev)[2]} 应 ${byMonth(prev)}`);
+  ok('上个月月初/月末值不动', hist(prev)[1]===52000 && hist(prev)[3]===60000);
+  ok('上个月收益按新净入金重算', hist(prev)[4]===60000-52000-byMonth(prev), String(hist(prev)[4]));
+  ok('两个月前的不动', hist(prev2)[2]===1000);
+  ok('手填的早期历史不动', hist('2022')[2]===7500);
+  ok('曲线的累计投入包含这些入金',
+     res.stockHistory.find(x=>x.ym===cur).invested===7500+1000+byMonth(prev)+byMonth(cur));
+
+  // 再打开：不重复写
+  const n=tabs.Ledger._rows.length;
+  let b=open(); await wait(1200);
+  ok('再次打开不重复补记', tabs.Ledger._rows.length===n && !b.log.some(x=>x.action==='autoLedger'||x.action==='addLedger'));
+
+  // 下一次执行（模拟 14 天后到期）：一对流水 + 余额正常变动
+  // 一次性转账 Marcus → 股票账户：同样记一对
+  b.w.doTransfer('marcus','broker',300); await wait(800);
+  const L2=tabs.Ledger._rows.slice(n-1);
+  ok('一次性 Marcus → 股票账户也记一对流水',
+     L2.some(r=>r[1]==='Redeem · Marcus'&&r[2]===300) && L2.some(r=>r[1]==='Transfer · 券商'&&r[2]===300), JSON.stringify(L2));
+  ok('Chase 现金仍不变', Math.abs(b.w.eval("cashInfo.balance")-20000)<0.005, String(b.w.eval("cashInfo.balance")));
+  // 股票账户 → Marcus：净入金减少
+  b.w.doTransfer('broker','marcus',100); await wait(800);
+  const r2=J(g.doGet({parameter:{}}));
+  ok('股票账户 → Marcus 记为净入金减少', hist(cur)[2]===byMonth(cur)+300-100, String(hist(cur)[2]));
+  b.w.doTransfer('chase','broker',50); await wait(600);
+  ok('Chase → 股票账户不重复记中转流水',
+     tabs.Ledger._rows.slice(1).filter(r=>r[2]===50).length===1);
+}

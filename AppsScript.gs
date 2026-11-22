@@ -1,5 +1,5 @@
 /**
- * 资产驾驶舱 · Google Apps Script 后端  V9.5  (2026-11-03)
+ * 资产驾驶舱 · Google Apps Script 后端  V9.6  (2026-11-21)
  *
  * 部署：Extensions → Apps Script → 全选删除旧代码 → 粘贴本文件 → 保存
  *      → Deploy → Manage deployments → 铅笔 → Version 选 "New version" → Deploy
@@ -12,6 +12,12 @@
  * 房贷是第 6 个模块，故本轮为 V6.x；下次大改别的模块升到 V7.0。
  * 前后端共用同一个号（index.html 里的 APP_VER），方便核对是否同步上线。
  * V6.2 以前的 v2~v12 是旧的流水号，保留原样不再重编。
+ *
+ * V9.6 2026-11-21  StockHistory 漏记 Marcus → 股票账户的入金
+ *   · 前端：两头都不是 Chase 的转账补记一对流水（Redeem · 来源 / Transfer · 去向，
+ *     对流动现金净 0），定期转账已执行的期数按 key 回补
+ *   · syncStockHist：除当月外，上个月也按流水补算净入金（C）和收益（E/F），
+ *     不动月初/月末值；记账起始日之前的月份不动
  *
  * V9.5 2026-11-03  RSU 成本改填欧元，按归属日汇率自动换算成美元
  *   · RSU 表新增三列：F Vest Price EUR、G EURUSD、H FX For；D 列改名 Vest Price (USD)。
@@ -1738,8 +1744,10 @@ function brokerInflow(lv, ym) {
   return Math.round(sum * 100) / 100;
 }
 
-// 只维护「当月」那一行：历史是你手填的，一律不动
-function syncStockHist(ss, lv, stock) {
+// 维护「当月」整行；上个月只补算净入金（C）和由它推出的收益（E/F），
+// 月初/月末值（B/D）不动 —— 月末值只有当月才拿得到。上个月要在记账起始日之后，
+// 之前的历史是你手填的，一律不动。这样月底那几天的入金、事后补记的入金都会补进去。
+function syncStockHist(ss, lv, stock, bookStart) {
   var sh = stockHistSheet(ss);
   var rows = readStockHist(sh);
   var ym = ymOf(new Date());
@@ -1752,6 +1760,20 @@ function syncStockHist(ss, lv, stock) {
   var gain = Math.round((endVal - startVal - net) * 100) / 100;
   var rate = startVal + net > 0 ? gain / (startVal + net) : 0;
   var line = [ym, startVal, net, endVal, gain, rate];
+
+  var pm = new Date(); pm = ymOf(new Date(pm.getFullYear(), pm.getMonth() - 1, 1));
+  var bsYm = bookStart ? ymOf(bookStart) : null;
+  for (var k = 0; k < rows.length; k++) {
+    var pr = rows[k];
+    if (pr.ym !== pm || !bsYm || pm < bsYm) continue;
+    var pnet = brokerInflow(lv, pm);
+    if (pnet === pr.net) break;
+    var pgain = Math.round((pr.end - pr.start - pnet) * 100) / 100;
+    var prate = pr.start + pnet > 0 ? pgain / (pr.start + pnet) : 0;
+    sh.getRange(pr.row, SH_COL.NET, 1, 1).setValue(pnet);
+    sh.getRange(pr.row, SH_COL.GAIN, 1, 2).setValues([[pgain, prate]]);
+    break;
+  }
 
   var cur = null;
   for (var j = 0; j < rows.length; j++) if (rows[j].ym === ym) cur = rows[j];
@@ -2021,7 +2043,7 @@ function readAllInner(force) {
            config: safeRun(function () { return readConfig(ss); }, {}),
            rsu: rsu,
            stockHistory: safeRun(function () {
-             return stockHistOut(syncStockHist(ss, lv, stock));
+             return stockHistOut(syncStockHist(ss, lv, stock, bs));
            }, []),
            property: safeRun(function () {
              var p = readProperty(ss);
